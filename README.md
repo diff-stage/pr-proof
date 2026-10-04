@@ -76,7 +76,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: select
-        uses: wardy484/pr-proof/select@main
+        uses: diff-stage/pr-proof/select@main
 
       # ...start your app and install Playwright here...
 
@@ -85,7 +85,7 @@ jobs:
         run: ./vendor/bin/pest --record-videos --record-videos-only=${{ steps.select.outputs.tests }}
 
       - if: success() && steps.record.outcome == 'success'
-        uses: wardy484/pr-proof/publish@main
+        uses: diff-stage/pr-proof/publish@main
         with:
           url: https://your-pr-proof-host
           api-token: ${{ secrets.PR_PROOF_TOKEN }}
@@ -120,7 +120,7 @@ jobs:
       - id: record
         run: ./vendor/bin/pest tests/Browser --record-videos
       - if: success() && steps.record.outcome == 'success'
-        uses: wardy484/pr-proof/publish@main
+        uses: diff-stage/pr-proof/publish@main
         with:
           mode: baseline
           url: https://your-pr-proof-host
