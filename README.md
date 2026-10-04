@@ -55,16 +55,10 @@ jobs:
         run: ./vendor/bin/pest --record-videos --record-videos-only=${{ steps.select.outputs.tests }}
 
       - if: steps.select.outputs.tests != ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.VIDEO_AWS_ID }}
-          aws-secret-access-key: ${{ secrets.VIDEO_AWS_KEY }}
-          aws-region: us-east-1
-
-      - if: steps.select.outputs.tests != ''
         uses: wardy484/pr-proof/publish@main
         with:
-          bucket: your-video-bucket
+          url: https://your-pr-proof-host
+          api-token: ${{ secrets.PR_PROOF_TOKEN }}
 ```
 
 `select` records the browser test files the PR changes. To record others, add a line to the PR description:
@@ -73,7 +67,7 @@ jobs:
 Browser videos: tests/Browser/CheckoutTest.php, tests/Browser/BookingTest.php
 ```
 
-`publish` uploads each video to your S3 bucket and keeps one comment on the PR up to date, with a preview and a link to the full video for every test. Links last 7 days.
+`publish` uploads each video to the pr-proof service and keeps one comment on the PR up to date. The comment shows a still from each test and links to a page where every video plays with normal controls. Videos are kept for 30 days.
 
 ## Licence
 
