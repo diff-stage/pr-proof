@@ -59,7 +59,7 @@ Completing a PR run pins its baseline videos. Later approvals do not change that
 
 ## Post videos on pull requests
 
-Run this as its own workflow, so your main test suite stays untouched. Boot your app the way your browser test workflow already does, then:
+Install the Diff Stage GitHub App and connect your repositories in Diff Stage. Add the workflow below after your app and browser test setup. GitHub Actions authenticates automatically; no repository secret or service URL is required.
 
 ```yaml
 on:
@@ -72,6 +72,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -84,12 +85,13 @@ jobs:
         if: steps.select.outputs.tests != ''
         run: ./vendor/bin/pest --record-videos --record-videos-only=${{ steps.select.outputs.tests }}
 
-      - if: success() && steps.record.outcome == 'success'
+      - if: success() && steps.record.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
         uses: diff-stage/pr-proof/publish@main
-        with:
-          url: https://your-pr-proof-host
-          api-token: ${{ secrets.PR_PROOF_TOKEN }}
 ```
+
+The publishing job needs `id-token: write` to request GitHub identity and `pull-requests: write` to post its comment. Fork pull requests can record videos, but cannot publish through the App. Keep credentials and publishing permissions out of jobs that execute fork code. Never use `pull_request_target` to run PR code.
+
+For self-hosted services or projects without an App connection, the existing `url` and `api-token` inputs still work. An explicit project token takes precedence over GitHub identity.
 
 `select` records the browser test files the PR changes. To record others, add a line to the PR description:
 
@@ -114,6 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       # ...install dependencies, start your app and install Playwright...
@@ -123,8 +126,6 @@ jobs:
         uses: diff-stage/pr-proof/publish@main
         with:
           mode: baseline
-          url: https://your-pr-proof-host
-          api-token: ${{ secrets.PR_PROOF_TOKEN }}
 ```
 
 `mode` defaults to `pull_request`. Baseline mode accepts only `push` or `workflow_dispatch` on the repository's default branch and never posts a PR comment. The workflow must check the recording step's outcome, including when it uses `continue-on-error`. Clear the video directory before recording on persistent runners to avoid uploading files from an earlier run.

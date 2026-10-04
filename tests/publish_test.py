@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,12 +19,30 @@ class PublishTest(unittest.TestCase):
         self.path = Path(self.temp.name)
         self.requests = []
         self.fail_upload = 0
+        self.identity_requests = []
+        self.credentials = []
+        self.identity_status = 200
+        self.identity_value = 'github-identity'
+        self.upload_status = 200
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                owner.identity_requests.append((self.path, self.headers['Authorization']))
+                self.send_response(owner.identity_status)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'value': owner.identity_value}).encode())
+
             def do_POST(self):
+                owner.credentials.append(self.headers['Authorization'])
                 body = self.rfile.read(int(self.headers['Content-Length']))
                 owner.requests.append((self.path, body, self.headers['Content-Type']))
+                if owner.upload_status != 200:
+                    self.send_response(owner.upload_status)
+                    self.end_headers()
+                    self.wfile.write(b'{"message":"Connect this repository to an active Diff Stage GitHub App installation."}')
+                    return
                 uploads = sum(path.endswith('/videos') for path, *_ in owner.requests)
                 if self.path.endswith('/videos') and uploads == owner.fail_upload:
                     self.send_response(500)
@@ -63,6 +82,58 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
     def run_publish(self, **env):
         return subprocess.run(['bash', str(ROOT / 'publish/publish.sh')], env=self.env | env,
                               capture_output=True, text=True)
+
+    def identity_env(self):
+        return dict(PR_PROOF_TOKEN='',
+                    ACTIONS_ID_TOKEN_REQUEST_URL=f'http://127.0.0.1:{self.server.server_port}/identity?job=123',
+                    ACTIONS_ID_TOKEN_REQUEST_TOKEN='request-token')
+
+    def test_app_identity_uploads_without_a_project_secret(self):
+        result = self.run_publish(**self.identity_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.credentials, ['Bearer github-identity'] * 4)
+        self.assertEqual(len(self.identity_requests), 4)
+        for url, authorization in self.identity_requests:
+            self.assertEqual(parse_qs(urlparse(url).query), {'job': ['123'], 'audience': ['diff-stage']})
+            self.assertEqual(authorization, 'Bearer request-token')
+        self.assertNotIn('github-identity', result.stdout)
+        self.assertIn('::add-mask::github-identity', result.stderr)
+        self.assertIn('pr comment 42', (self.path / 'gh.log').read_text())
+
+    def test_baseline_also_uses_app_identity(self):
+        result = self.run_publish(MODE='baseline', **self.identity_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.credentials, ['Bearer github-identity'] * 4)
+        self.assertFalse((self.path / 'gh.log').exists())
+
+    def test_explicit_project_token_takes_precedence(self):
+        result = self.run_publish(**(self.identity_env() | {'PR_PROOF_TOKEN': 'project-token'}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.identity_requests, [])
+        self.assertEqual(self.credentials, ['Bearer project-token'] * 4)
+
+    def test_service_setup_errors_are_visible_and_stop_publication(self):
+        self.upload_status = 403
+        result = self.run_publish(**self.identity_env())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Connect this repository', result.stderr)
+        self.assertEqual(len(self.requests), 1)
+        self.assertFalse((self.path / 'gh.log').exists())
+
+    def test_missing_identity_permission_fails_before_upload(self):
+        result = self.run_publish(PR_PROOF_TOKEN='', ACTIONS_ID_TOKEN_REQUEST_URL='', ACTIONS_ID_TOKEN_REQUEST_TOKEN='')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('id-token: write', result.stderr)
+        self.assertEqual(self.requests, [])
+
+    def test_invalid_identity_response_fails_before_upload(self):
+        for status, value in [(403, 'denied'), (200, None), (200, '')]:
+            self.identity_status, self.identity_value = status, value
+            result = self.run_publish(**self.identity_env())
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Unable to obtain GitHub Actions identity', result.stderr)
+        self.assertEqual(self.requests, [])
+        self.assertFalse((self.path / 'gh.log').exists())
 
     def test_pr_uploads_telemetry_then_completes_and_comments(self):
         result = self.run_publish()

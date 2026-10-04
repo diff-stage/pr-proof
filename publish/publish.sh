@@ -18,7 +18,29 @@ videos=("$VIDEOS"/*.webm)
 if (( ${#videos[@]} == 0 )); then echo "No videos recorded"; exit 0; fi
 
 command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; }
-api() { curl -sSf -H "Authorization: Bearer $PR_PROOF_TOKEN" -H 'Accept: application/json' "$@"; }
+if [[ -z "${PR_PROOF_TOKEN:-}" && ( -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ) ]]; then
+  echo 'Allow id-token: write on the publishing job and connect this repository to the Diff Stage GitHub App. No PR_PROOF_TOKEN secret is needed.' >&2
+  exit 1
+fi
+
+api() {
+  local credential="${PR_PROOF_TOKEN:-}"
+  if [[ -z "$credential" ]]; then
+    credential=$(curl -sSf --get --data-urlencode 'audience=diff-stage' \
+      -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" | \
+      jq -er '.value | select(type == "string" and length > 0)') || {
+      echo 'Unable to obtain GitHub Actions identity. Check id-token: write on the publishing job.' >&2
+      return 1
+    }
+    echo "::add-mask::$credential" >&2
+  fi
+  local response
+  response=$(curl --silent --show-error --fail-with-body -H "Authorization: Bearer $credential" -H 'Accept: application/json' "$@") || {
+    printf '%s\n' "$response" >&2
+    return 1
+  }
+  printf '%s' "$response"
+}
 
 run=$(api -X POST "${PR_PROOF_URL%/}/api/runs" \
   -H "Content-Type: application/json" --data "$payload")
