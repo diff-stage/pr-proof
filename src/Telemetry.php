@@ -100,7 +100,7 @@ final class Telemetry
             'check' => "Ticked {$target}",
             'uncheck' => "Unticked {$target}",
             'hover' => "Hovered over {$target}",
-            'press' => 'Pressed '.($params['key'] ?? 'a key').($target === '' ? '' : " in {$target}"),
+            'press' => 'Pressed '.self::keyName((string) ($params['key'] ?? '')).($target === '' ? '' : " in {$target}"),
             'selectOption' => "Chose an option in {$target}",
             'setInputFiles' => "Attached a file to {$target}",
             default => self::typed($target, (string) ($params['value'] ?? $params['text'] ?? '')),
@@ -242,26 +242,39 @@ final class Telemetry
         return $method.'|'.($params['selector'] ?? '').'|'.($params['value'] ?? $params['key'] ?? '');
     }
 
-    private static function typed(string $target, string $value): string
+    /**
+     * Named keys like Enter or Control+A, but never a typed character.
+     */
+    private static function keyName(string $key): string
     {
-        if (preg_match('/pass(word)?|secret|card|cvc|token/i', $target)) {
-            return "Typed into {$target}";
-        }
-
-        $shown = mb_strlen($value) > 40 ? mb_substr($value, 0, 40).'…' : $value;
-
-        return $value === '' ? "Cleared {$target}" : "Typed \"{$shown}\" into {$target}";
+        return $key === '' || mb_strlen((string) preg_replace('/^Shift\+/', '', $key)) === 1 ? 'a key' : $key;
     }
 
+    private static function typed(string $target, string $value): string
+    {
+        return $value === '' ? "Cleared {$target}" : "Typed into {$target}";
+    }
+
+    /**
+     * The path and query keys of a URL. Query values can hold tokens, so they're never kept.
+     */
     private static function path(string $url): string
     {
         $parts = parse_url($url);
 
-        if ($parts === false || ! isset($parts['path'])) {
-            return $url;
+        if ($parts === false) {
+            return (string) preg_replace('/[?#].*/s', '', $url);
         }
 
-        return $parts['path'].(isset($parts['query']) ? '?'.$parts['query'] : '');
+        $path = $parts['path'] ?? '/';
+
+        if (! isset($parts['query'])) {
+            return $path;
+        }
+
+        $keys = array_filter(array_map(fn (string $pair): string => explode('=', $pair, 2)[0], explode('&', $parts['query'])), fn (string $key): bool => $key !== '');
+
+        return $path.'?'.implode('&', array_map(fn (string $key): string => "{$key}=…", $keys));
     }
 
     private static function now(): float

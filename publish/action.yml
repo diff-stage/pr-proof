@@ -33,6 +33,7 @@ runs:
         PR_PROOF_TOKEN: ${{ inputs.api-token }}
         PR_PROOF_URL: ${{ inputs.url }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_BODY: ${{ github.event.pull_request.body }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         HEAD_REF: ${{ github.event.pull_request.head.ref }}
         VIDEOS: ${{ inputs.videos }}

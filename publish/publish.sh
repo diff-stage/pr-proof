@@ -4,11 +4,13 @@ set -euo pipefail
 case "$MODE" in
   pull_request)
     [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Pull request mode requires a pull request event" >&2; exit 1; }
-    payload=$(jq -n --arg sha "$HEAD_SHA" --arg branch "$HEAD_REF" --argjson pr "$PR_NUMBER" --arg id "$RECORDING_ID" '{kind:"pull_request",pull_request:$pr,sha:$sha,branch:$branch,recording_id:$id}')
+    sha=$HEAD_SHA
+    payload=$(jq -n --arg sha "$sha" --arg branch "$HEAD_REF" --argjson pr "$PR_NUMBER" --arg id "$RECORDING_ID" '{kind:"pull_request",pull_request:$pr,sha:$sha,branch:$branch,recording_id:$id}')
     ;;
   baseline)
     [[ "$EVENT_NAME" == push || "$EVENT_NAME" == workflow_dispatch ]] && [[ "$REF_NAME" == "$DEFAULT_BRANCH" && -n "$DEFAULT_BRANCH" ]] || { echo "Baselines require a push or workflow_dispatch on the default branch" >&2; exit 1; }
-    payload=$(jq -n --arg sha "$RECORDING_SHA" --arg branch "$REF_NAME" --argjson order "$RUN_NUMBER" --arg id "$RECORDING_ID" '{kind:"baseline",pull_request:null,sha:$sha,branch:$branch,source_order:$order,recording_id:$id}')
+    sha=$RECORDING_SHA
+    payload=$(jq -n --arg sha "$sha" --arg branch "$REF_NAME" --argjson order "$RUN_NUMBER" --arg id "$RECORDING_ID" '{kind:"baseline",pull_request:null,sha:$sha,branch:$branch,source_order:$order,recording_id:$id}')
     ;;
   *) echo "Unknown publish mode: $MODE" >&2; exit 1 ;;
 esac
@@ -16,6 +18,23 @@ esac
 shopt -s nullglob
 videos=("$VIDEOS"/*.webm)
 if (( ${#videos[@]} == 0 )); then echo "No videos recorded"; exit 0; fi
+
+if [[ -f "$VIDEOS/sha.txt" ]]; then
+  recorded=$(tr -d '[:space:]' < "$VIDEOS/sha.txt")
+  [[ "$recorded" == "$sha" ]] || { echo "Videos were recorded at $recorded, not $sha" >&2; exit 1; }
+fi
+
+names=()
+for video in "${videos[@]}"; do names+=("$(basename "$video" .webm)"); done
+
+review='[]'
+if [[ "$MODE" == pull_request ]]; then
+  review=$(jq -Rs -f "$(dirname "${BASH_SOURCE[0]}")/review.jq" <<< "${PR_BODY:-}")
+fi
+jq -nr --argjson review "$review" '$review[].flow_key | select(IN($ARGS.positional[]) | not)
+  | "::warning::Browser review lists \(.), but no video has that flow key."' --args "${names[@]}"
+mapfile -t names < <(jq -rn --argjson review "$review" '($review | map(.flow_key)) as $keys
+  | ($keys - ($keys - $ARGS.positional)) + ($ARGS.positional - $keys) | .[]' --args "${names[@]}")
 
 command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; }
 if [[ -z "${PR_PROOF_TOKEN:-}" && ( -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ) ]]; then
@@ -49,9 +68,10 @@ run_url=$(jq -r .url <<< "$run")
 
 previews=''
 links=''
+reviewed=''
 preview_count=0
-for video in "${videos[@]}"; do
-  name=$(basename "$video" .webm)
+for name in "${names[@]}"; do
+  video="$VIDEOS/$name.webm"
   title=$(jq -r --arg f "$name.webm" '.[$f] // empty' "$VIDEOS/titles.json" 2>/dev/null || true)
   title=${title:-$name}
   mp4="${video%.webm}.mp4"
@@ -63,12 +83,22 @@ for video in "${videos[@]}"; do
   telemetry="${mp4}.json"
   [[ -f "$telemetry" ]] || printf '{"steps":[],"problems":[]}\n' > "$telemetry"
 
+  entry=$(jq -c --arg key "$name" 'map(select(.flow_key == $key))[0] // empty' <<< "$review")
+  fields=()
+  if [[ -n "$entry" ]]; then
+    fields=(--form-string "review_reason=$(jq -r .reason <<< "$entry")" --form-string "review_order=$(jq -r .order <<< "$entry")")
+  fi
+
   uploaded=$(api -X POST "${PR_PROOF_URL%/}/api/runs/$run_id/videos" \
-    -F "name=$title" -F "flow_key=$name" -F "telemetry=@$telemetry;type=application/json" -F "video=@$mp4;type=video/mp4" -F "poster=@$poster;type=image/jpeg")
+    --form-string "name=$title" --form-string "flow_key=$name" "${fields[@]}" \
+    -F "telemetry=@$telemetry;type=application/json" -F "video=@$mp4;type=video/mp4" -F "poster=@$poster;type=image/jpeg")
   video_url=$(jq -r '.url | @html' <<< "$uploaded")
   poster_url=$(jq -r '.poster_url | @html' <<< "$uploaded")
   escaped_title=$(jq -nr --arg title "$title" '$title | @html')
-  if (( preview_count < 3 )); then
+  if [[ -n "$entry" ]]; then
+    reviewed+=$(printf '<li><a href="%s">%s</a>: %s</li>' "$video_url" "$escaped_title" "$(jq -r '.reason | @html' <<< "$entry")")
+  fi
+  if (( preview_count < 3 )) && [[ $(jq '.poster_public != false' <<< "$uploaded") == true ]]; then
     previews+=$(printf '<td><a href="%s"><img src="%s" height="120" alt="%s"></a></td>' \
       "$video_url" "$poster_url" "$escaped_title")
     preview_count=$(( preview_count + 1 ))
@@ -92,8 +122,16 @@ trap 'rm -f "$body"' EXIT
   echo
   echo "**[Watch all ${#videos[@]} on pr-proof]($run_url)**"
   echo
-  echo "<table><tr>$previews</tr></table>"
-  echo
+  if [[ -n "$previews" ]]; then
+    echo "<table><tr>$previews</tr></table>"
+    echo
+  fi
+  if [[ -n "$reviewed" ]]; then
+    echo '**What to check**'
+    echo
+    echo "<ol>$reviewed</ol>"
+    echo
+  fi
   echo '<details>'
   echo "<summary>All browser tests (${#videos[@]})</summary>"
   echo
