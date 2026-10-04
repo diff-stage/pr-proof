@@ -50,7 +50,7 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         self.env = dict(os.environ, PATH=f'{self.path}:{os.environ["PATH"]}', MODE='pull_request',
                         PR_NUMBER='42', HEAD_SHA='a' * 40, HEAD_REF='feature',
                         EVENT_NAME='push', DEFAULT_BRANCH='main', REF_NAME='main',
-                        RUN_NUMBER='23', RECORDING_SHA='b' * 40, VIDEOS=str(self.path),
+                        RUN_NUMBER='23', RECORDING_ID='100:1', RECORDING_SHA='b' * 40, VIDEOS=str(self.path),
                         COMPRESS=str(self.path / 'compress'), PR_PROOF_TOKEN='test',
                         PR_PROOF_URL=f'http://127.0.0.1:{self.server.server_port}',
                         GITHUB_REPOSITORY='owner/repo', GH_LOG=str(self.path / 'gh.log'))
@@ -67,7 +67,7 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
     def test_pr_uploads_telemetry_then_completes_and_comments(self):
         result = self.run_publish()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(self.requests[0][1]), dict(kind='pull_request', pull_request=42, sha='a'*40, branch='feature'))
+        self.assertEqual(json.loads(self.requests[0][1]), dict(kind='pull_request', pull_request=42, sha='a'*40, branch='feature', recording_id='100:1'))
         self.assertEqual([path for path, *_ in self.requests], ['/api/runs', '/api/runs/run1/videos', '/api/runs/run1/videos', '/api/runs/run1/complete'])
         for (_, body, _), key in zip(self.requests[1:3], ('booking', 'checkout')):
             self.assertIn(f'name="flow_key"\r\n\r\n{key}'.encode(), body)
@@ -79,7 +79,7 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
     def test_baseline_metadata_and_no_comment(self):
         result = self.run_publish(MODE='baseline')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(self.requests[0][1]), dict(kind='baseline', pull_request=None, sha='b'*40, branch='main', source_order=23))
+        self.assertEqual(json.loads(self.requests[0][1]), dict(kind='baseline', pull_request=None, sha='b'*40, branch='main', source_order=23, recording_id='100:1'))
         self.assertFalse((self.path / 'gh.log').exists())
 
     def test_unapproved_events_and_branches_make_no_requests(self):

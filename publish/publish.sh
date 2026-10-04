@@ -4,11 +4,11 @@ set -euo pipefail
 case "$MODE" in
   pull_request)
     [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Pull request mode requires a pull request event" >&2; exit 1; }
-    payload=$(jq -n --arg sha "$HEAD_SHA" --arg branch "$HEAD_REF" --argjson pr "$PR_NUMBER" '{kind:"pull_request",pull_request:$pr,sha:$sha,branch:$branch}')
+    payload=$(jq -n --arg sha "$HEAD_SHA" --arg branch "$HEAD_REF" --argjson pr "$PR_NUMBER" --arg id "$RECORDING_ID" '{kind:"pull_request",pull_request:$pr,sha:$sha,branch:$branch,recording_id:$id}')
     ;;
   baseline)
     [[ "$EVENT_NAME" == push || "$EVENT_NAME" == workflow_dispatch ]] && [[ "$REF_NAME" == "$DEFAULT_BRANCH" && -n "$DEFAULT_BRANCH" ]] || { echo "Baselines require a push or workflow_dispatch on the default branch" >&2; exit 1; }
-    payload=$(jq -n --arg sha "$RECORDING_SHA" --arg branch "$REF_NAME" --argjson order "$RUN_NUMBER" '{kind:"baseline",pull_request:null,sha:$sha,branch:$branch,source_order:$order}')
+    payload=$(jq -n --arg sha "$RECORDING_SHA" --arg branch "$REF_NAME" --argjson order "$RUN_NUMBER" --arg id "$RECORDING_ID" '{kind:"baseline",pull_request:null,sha:$sha,branch:$branch,source_order:$order,recording_id:$id}')
     ;;
   *) echo "Unknown publish mode: $MODE" >&2; exit 1 ;;
 esac
