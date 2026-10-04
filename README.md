@@ -6,8 +6,11 @@ Reviewers see each changed flow working without checking out the branch. The rec
 
 ## Install
 
+pr-proof isn't on Packagist yet, so add its GitHub repository before requiring it:
+
 ```bash
-composer require --dev wardy484/pr-proof
+composer config repositories.pr-proof vcs https://github.com/diff-stage/pr-proof
+composer require --dev wardy484/pr-proof:0.1.0
 ```
 
 Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. pr-proof replaces three internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
@@ -52,9 +55,9 @@ Next to each video, pr-proof writes a `.json` file with what happened during the
 
 ## Compare approved flows
 
-The service compares PR videos with the latest completed default-branch recording of the same flow. It shows baseline and PR videos side by side with paired playback controls, ordered actions and new or fixed browser problems. A flow without an approved recording gets a "New flow" label.
+The service compares PR videos with the latest completed default-branch recording of the same flow. It shows baseline and PR videos side by side with paired playback controls, ordered actions and new or fixed browser problems. Without an approved recording to compare against, the service labels the PR video instead. "Baseline unavailable" means the project has no approved baseline yet. "No matching baseline" means no approved recording has this flow key. Neither label means the flow is new. The baseline may not be recorded yet, or the test may have been renamed.
 
-Each flow key is the recording filename without `.webm`. Renaming a test changes its filename and starts a new flow for now. Keep the same recording workflow for baseline uploads: its GitHub `run_number` orders approvals so a slower, older run cannot replace a newer baseline.
+Each flow key is the recording filename without `.webm`. Renaming a test changes its filename and flow key, so it no longer matches its old baseline. Keep the same recording workflow for baseline uploads: its GitHub `run_number` orders approvals so a slower, older run cannot replace a newer baseline.
 
 Completing a PR run pins its baseline videos. Later approvals do not change that comparison. This compares videos and browser actions; it does not calculate visual differences.
 
@@ -85,7 +88,7 @@ jobs:
           persist-credentials: false
 
       - id: select
-        uses: diff-stage/pr-proof/select@main
+        uses: diff-stage/pr-proof/select@v0.1.0
 
       # ...install dependencies, start your app and install Playwright here...
 
@@ -118,7 +121,7 @@ jobs:
           name: browser-videos-${{ github.event.pull_request.head.sha }}
           path: tests/Browser/Videos
 
-      - uses: diff-stage/pr-proof/publish@main
+      - uses: diff-stage/pr-proof/publish@v0.1.0
 ```
 
 The two jobs keep PR code away from publishing rights:
@@ -127,6 +130,8 @@ The two jobs keep PR code away from publishing rights:
 - `publish` never runs PR code. It downloads the recordings and uploads them. It needs `id-token: write` to request GitHub identity and `pull-requests: write` to post its comment.
 - The publisher refuses to upload if `sha.txt` names a different commit from the PR head.
 - Fork PRs still record, and their videos stay as workflow artifacts. They can't publish through the App. Never use `pull_request_target` to run PR code.
+
+The examples pin the `v0.1.0` tag. Pin a full commit SHA instead if your workflows require immutable action references.
 
 For self-hosted services or projects without an App connection, the existing `url` and `api-token` inputs still work. An explicit project token takes precedence over GitHub identity.
 
@@ -192,7 +197,7 @@ jobs:
       - id: record
         run: ./vendor/bin/pest tests/Browser --record-videos
       - if: success() && steps.record.outcome == 'success'
-        uses: diff-stage/pr-proof/publish@main
+        uses: diff-stage/pr-proof/publish@v0.1.0
         with:
           mode: baseline
 ```
