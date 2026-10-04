@@ -23,6 +23,9 @@ foreach ($files as $file) {
     $data = json_decode(file_get_contents($file), true, flags: JSON_THROW_ON_ERROR);
     if (count($data["steps"]) < 3) throw new RuntimeException("Missing recorded actions");
     if ($data["problems"] !== []) throw new RuntimeException("Unexpected browser problems");
+    $text = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (str_contains($text, "query-secret") || str_contains($text, "Compatibility verified")) throw new RuntimeException("Telemetry kept a typed or query value");
+    if (! str_contains($text, "Opened /?token=…")) throw new RuntimeException("Missing redacted page step");
 }
 '
 for video in videos/*.webm; do

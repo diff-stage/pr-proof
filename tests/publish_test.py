@@ -3,6 +3,7 @@ from html.parser import HTMLParser
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import threading
@@ -11,6 +12,28 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def form_field(body, name):
+    match = re.search(rb'name="' + name.encode() + rb'"\r\n\r\n(.*?)\r\n--', body, re.S)
+    return match and match.group(1).decode()
+
+
+class Links(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.images, self.links, self.text = [], [], []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'script':
+            raise AssertionError('Comment text became an HTML element')
+        if tag == 'img':
+            self.images.append(dict(attrs))
+        if tag == 'a':
+            self.links.append(dict(attrs))
+
+    def handle_data(self, data):
+        self.text.append(data)
 
 
 class PublishTest(unittest.TestCase):
@@ -25,6 +48,7 @@ class PublishTest(unittest.TestCase):
         self.identity_status = 200
         self.identity_value = 'github-identity'
         self.upload_status = 200
+        self.poster_public = None
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -49,10 +73,13 @@ class PublishTest(unittest.TestCase):
                     self.send_response(500)
                     self.end_headers()
                     return
+                response = {'id': 'run1', 'url': 'http://watch/run1', 'poster_url': 'http://poster'}
+                if owner.poster_public is not None:
+                    response['poster_public'] = owner.poster_public
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                self.wfile.write(json.dumps({'id': 'run1', 'url': 'http://watch/run1', 'poster_url': 'http://poster'}).encode())
+                self.wfile.write(json.dumps(response).encode())
 
             def log_message(self, *args):
                 pass
@@ -92,6 +119,14 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
     def run_publish(self, **env):
         return subprocess.run(['bash', str(ROOT / 'publish/publish.sh')], env=self.env | env,
                               capture_output=True, text=True)
+
+    def uploads(self):
+        return [body for path, body, _ in self.requests if path.endswith('/videos')]
+
+    def comment(self):
+        parser = Links()
+        parser.feed((self.path / 'comment.md').read_text())
+        return parser
 
     def identity_env(self):
         return dict(PR_PROOF_TOKEN='',
@@ -154,6 +189,7 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
             self.assertIn(f'name="flow_key"\r\n\r\n{key}'.encode(), body)
             self.assertIn(b'name="telemetry"; filename=', body)
             self.assertIn(b'"at":0.5', body)
+            self.assertNotIn(b'review_', body)
         self.assertEqual(json.loads(self.requests[-1][1]), {'expected_videos': 2})
         self.assertIn('pr comment 42', (self.path / 'gh.log').read_text())
 
@@ -171,30 +207,70 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         self.assertTrue(body.startswith('<!-- pr-proof -->'))
         self.assertIn('Watch all 5 on pr-proof', body)
         self.assertIn('<summary>All browser tests (5)</summary>', body)
-        images, links, text = [], [], []
-
-        class Parser(HTMLParser):
-            def handle_starttag(self, tag, attrs):
-                if tag == 'img':
-                    images.append(dict(attrs))
-                if tag == 'a':
-                    links.append(dict(attrs))
-                self.assert_safe_tag(tag)
-
-            def assert_safe_tag(self, tag):
-                if tag == 'script':
-                    raise AssertionError('Test title became an HTML element')
-
-            def handle_data(self, data):
-                text.append(data)
-
-        Parser().feed(body)
-        self.assertEqual(len(images), 3)
-        self.assertEqual(len(links), 8)
-        for image, title in zip(images, titles.values()):
+        comment = self.comment()
+        self.assertEqual(len(comment.images), 3)
+        self.assertEqual(len(comment.links), 8)
+        for image, title in zip(comment.images, titles.values()):
             self.assertEqual(image, {'src': 'http://poster', 'height': '120', 'alt': title})
         for title in titles.values():
-            self.assertIn(title, text)
+            self.assertIn(title, comment.text)
+        self.assertNotIn('What to check', body)
+
+    def test_review_notes_order_uploads_and_explain_each_video(self):
+        reason = '@/etc/hostname shows the <script> & "decline" message'
+        body = '\r\n'.join([
+            'Some summary.',
+            'Browser review:',
+            '',
+            f'1. `checkout` — {reason}',
+            '2) `missing-flow`: Not recorded anywhere.',
+            '3. `checkout` - Duplicate is ignored.',
+            '4. `booking` – ' + 'x' * 1200,
+            'Recorded locally at abc1234.',
+            '5. `ignored` — After the list ended.',
+        ])
+        result = self.run_publish(PR_BODY=body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('::warning::Browser review lists missing-flow, but no video has that flow key.', result.stdout)
+        checkout, booking = self.uploads()
+        self.assertEqual(form_field(checkout, 'flow_key'), 'checkout')
+        self.assertEqual(form_field(checkout, 'review_reason'), reason)
+        self.assertEqual(form_field(checkout, 'review_order'), '1')
+        self.assertEqual(form_field(booking, 'review_reason'), 'x' * 1000)
+        self.assertEqual(form_field(booking, 'review_order'), '3')
+        comment = self.comment()
+        text = ''.join(comment.text)
+        self.assertIn('What to check', text)
+        self.assertIn('checkout: ' + reason, text)
+        self.assertEqual([image['alt'] for image in comment.images], ['checkout', 'booking'])
+        self.assertNotIn('ignored', text)
+
+    def test_review_notes_only_change_pull_request_runs(self):
+        result = self.run_publish(MODE='baseline', PR_BODY='Browser review:\n1. `booking` — Reason.')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for body in self.uploads():
+            self.assertNotIn(b'review_', body)
+
+    def test_private_posters_are_linked_but_not_embedded(self):
+        self.poster_public = False
+        result = self.run_publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        comment = self.comment()
+        self.assertEqual(comment.images, [])
+        self.assertNotIn('http://poster', (self.path / 'comment.md').read_text())
+        self.assertEqual([link['href'] for link in comment.links], ['http://watch/run1'] * 2)
+
+    def test_recordings_from_another_commit_are_never_published(self):
+        (self.path / 'sha.txt').write_text('c' * 40 + '\n')
+        result = self.run_publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('recorded at ' + 'c' * 40, result.stderr)
+        self.assertEqual(self.requests, [])
+
+        (self.path / 'sha.txt').write_text('a' * 40 + '\n')
+        result = self.run_publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.uploads()), 2)
 
     def test_baseline_metadata_and_no_comment(self):
         result = self.run_publish(MODE='baseline')

@@ -244,24 +244,29 @@ final class Telemetry
 
     private static function typed(string $target, string $value): string
     {
-        if (preg_match('/pass(word)?|secret|card|cvc|token/i', $target)) {
-            return "Typed into {$target}";
-        }
-
-        $shown = mb_strlen($value) > 40 ? mb_substr($value, 0, 40).'…' : $value;
-
-        return $value === '' ? "Cleared {$target}" : "Typed \"{$shown}\" into {$target}";
+        return $value === '' ? "Cleared {$target}" : "Typed into {$target}";
     }
 
+    /**
+     * The path and query keys of a URL. Query values can hold tokens, so they're never kept.
+     */
     private static function path(string $url): string
     {
         $parts = parse_url($url);
 
-        if ($parts === false || ! isset($parts['path'])) {
-            return $url;
+        if ($parts === false) {
+            return (string) preg_replace('/[?#].*/s', '', $url);
         }
 
-        return $parts['path'].(isset($parts['query']) ? '?'.$parts['query'] : '');
+        $path = $parts['path'] ?? '/';
+
+        if (! isset($parts['query'])) {
+            return $path;
+        }
+
+        $keys = array_filter(array_map(fn (string $pair): string => explode('=', $pair, 2)[0], explode('&', $parts['query'])));
+
+        return $path.'?'.implode('&', array_map(fn (string $key): string => "{$key}=…", $keys));
     }
 
     private static function now(): float
