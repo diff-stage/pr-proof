@@ -11,11 +11,13 @@ namespace Composer {
 }
 
 namespace {
+    use PrProof\Overrides;
+
     require __DIR__.'/../../src/Overrides.php';
     $_SERVER['argv'] = ['pest', '--record-videos'];
 
     try {
-        PrProof\Overrides::registerWhenRecording();
+        Overrides::registerWhenRecording();
         throw new LogicException('Unsupported version was accepted');
     } catch (RuntimeException $exception) {
         if (! str_contains($exception->getMessage(), 'v5.1.1 is installed')) {

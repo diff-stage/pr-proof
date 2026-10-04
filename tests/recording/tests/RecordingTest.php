@@ -3,7 +3,7 @@
 use Pest\Browser\Playwright\Client;
 use PrProof\Recorder;
 
-it('records real typing and a persisted page result', function () {
+it('records real typing and clicking', function () {
     $source = (new ReflectionClass(Client::class))->getFileName();
     expect(str_contains($source, '/overrides/'))->toBe(Recorder::enabled());
 
