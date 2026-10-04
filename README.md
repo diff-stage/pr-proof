@@ -10,7 +10,7 @@ Reviewers see each changed flow working without checking out the branch. The rec
 composer require --dev wardy484/pr-proof
 ```
 
-Requires `pestphp/pest-plugin-browser` 4.3.1. pr-proof replaces three of its internal classes while recording, so it supports one exact version and stops with an error on any other.
+Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. pr-proof replaces three internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
 
 ## Record locally
 

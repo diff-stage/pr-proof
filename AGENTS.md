@@ -5,7 +5,7 @@ pr-proof records readable videos of Pest browser tests and posts them on pull re
 ## How it fits together
 
 - `src/Plugin.php` reads `--record-videos`, `--record-videos-only` and `--record-videos-pause`.
-- `src/bootstrap.php` (Composer `autoload.files`) swaps three Pest Browser classes for the copies in `overrides/` before Pest loads them. They target `pestphp/pest-plugin-browser` v4.3.1 exactly.
+- `src/bootstrap.php` (Composer `autoload.files`) swaps three Pest Browser classes for the copies in `overrides/` before Pest loads them. They support `pestphp/pest-plugin-browser` v4.3.1 and v5.1.2 exactly. Browser 5 tracing is preserved.
 - `select/action.yml` picks test files from the PR diff and any `Browser videos:` line in the description.
 - `publish/action.yml` compresses videos, uploads them to the service and keeps one PR comment up to date.
 

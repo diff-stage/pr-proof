@@ -1,0 +1,20 @@
+{
+    "name": "pr-proof/recording-test",
+    "require-dev": {
+        "wardy484/pr-proof": "@dev"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../..",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}

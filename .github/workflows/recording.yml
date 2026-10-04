@@ -1,0 +1,42 @@
+name: Recording compatibility
+on: [pull_request, push]
+permissions:
+  contents: read
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - pest: '^4.0'
+            browser: '4.3.1'
+            playwright: '1.59.1'
+          - pest: '^5.2.1'
+            browser: '5.1.2'
+            playwright: '1.63.0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@b604ade2a87db23f8871b7182e69ec5e75effb45 # v2
+        with:
+          php-version: '8.5'
+          extensions: sockets
+          coverage: none
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - working-directory: tests/recording
+        env:
+          PEST: ${{ matrix.pest }}
+          BROWSER: ${{ matrix.browser }}
+          PLAYWRIGHT_SKIP_BROWSER_GC: 1
+          PLAYWRIGHT: ${{ matrix.playwright }}
+        run: |
+          composer require --dev "pestphp/pest:$PEST" "pestphp/pest-plugin-browser:$BROWSER" --no-interaction
+          npm install --no-save --package-lock=false "playwright@$PLAYWRIGHT"
+          npx playwright install --with-deps chromium
+          bash run.sh
+      - name: Browser 5 tracing still works while recording
+        if: matrix.browser == '5.1.2'
+        working-directory: tests/recording
+        run: bash run.sh --trace

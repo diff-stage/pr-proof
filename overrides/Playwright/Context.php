@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Pest\Browser\Playwright;
 
-use PrProof\Recorder;
 use Exception;
+use PrProof\Recorder;
 use PrProof\Telemetry;
 
 /**
@@ -20,6 +20,8 @@ final class Context
      */
     private bool $closed = false;
 
+    private ?Tracing $tracing = null;
+
     private ?string $videoPath = null;
 
     /**
@@ -32,9 +34,19 @@ final class Context
      */
     public function __construct(
         private readonly Browser $browser,
-        private readonly string $guid
+        private readonly string $guid,
+        private readonly ?string $tracingGuid = null,
     ) {
         //
+    }
+
+    public function tracing(): ?Tracing
+    {
+        if ($this->tracingGuid === null) {
+            return null;
+        }
+
+        return $this->tracing ??= new Tracing($this->tracingGuid);
     }
 
     /**
