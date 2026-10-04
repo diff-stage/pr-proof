@@ -177,8 +177,6 @@ final class PendingAwaitablePage
         $video = Recorder::pathForCurrentTest();
 
         if ($video !== null) {
-            Telemetry::begin($video);
-
             $viewport = $options['viewport'] ?? $this->device->context()['viewport'];
             $scale = min(1, 1280 / $viewport['width']);
 
@@ -206,8 +204,14 @@ final class PendingAwaitablePage
 
         $url = ComputeUrl::from($this->url);
 
+        if ($video !== null) {
+            Telemetry::begin();
+        }
+
+        $page = $context->newPage();
+
         return new AwaitableWebpage(
-            $context->newPage()->goto($url, $options),
+            $page->goto($url, $options),
             $url,
         );
     }

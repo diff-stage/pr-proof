@@ -82,10 +82,6 @@ final class Context
             return;
         }
 
-        if ($this->videoPath !== null) {
-            Telemetry::captureScreen();
-        }
-
         try {
             // fix this...
             $response = $this->sendMessage('close');

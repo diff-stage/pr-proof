@@ -92,7 +92,6 @@ final class Client
 
         if (! $retry && Recorder::enabled() && in_array($method, self::PAUSED_ACTIONS, true) && Recorder::pathForCurrentTest() !== null) {
             usleep(Recorder::pause() * 1000);
-            Telemetry::captureScreen();
         }
 
         Telemetry::action($method, $params);

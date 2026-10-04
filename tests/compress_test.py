@@ -1,0 +1,39 @@
+"""Verify trimming with real ffmpeg, including repeat publishing."""
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class CompressionTest(unittest.TestCase):
+    def test_trim_shifts_telemetry_without_overwriting_raw_times(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            video = path / 'flow.webm'
+            output = path / 'flow.mp4'
+            subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
+                            'color=white:s=160x90:r=25:d=1', '-f', 'lavfi', '-i',
+                            'color=blue:s=160x90:r=25:d=2', '-filter_complex',
+                            '[0:v][1:v]concat=n=2:v=1:a=0', '-c:v', 'libvpx', str(video)], check=True)
+            raw = {'steps': [{'at': 1.5, 'text': 'Clicked checkout'}],
+                   'problems': [{'at': 0.2, 'kind': 'console', 'text': 'Error'}]}
+            source = path / 'flow.json'
+            source.write_text(json.dumps(raw))
+            results = []
+            for _ in range(2):
+                subprocess.run(['bash', str(ROOT / 'bin/pr-proof-compress'), str(video), str(output)], check=True)
+                results.append(json.loads(Path(str(output) + '.json').read_text()))
+            self.assertEqual(json.loads(source.read_text()), raw)
+            self.assertEqual(results[0], results[1])
+            self.assertAlmostEqual(results[0]['steps'][0]['at'], 0.5, delta=0.1)
+            self.assertEqual(results[0]['problems'][0]['at'], 0)
+            duration = float(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries',
+                                                      'format=duration', '-of', 'csv=p=0', str(output)]))
+            self.assertAlmostEqual(duration, 3, delta=0.15)
+
+
+if __name__ == '__main__':
+    unittest.main()

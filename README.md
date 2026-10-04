@@ -44,47 +44,18 @@ Next to each video, pr-proof writes a `.json` file with what happened during the
 
 - `at` is seconds into the video.
 - Steps come from clicks, ticks, typing and page changes. Typing into password, card or token fields doesn't show the value.
-- `screenshot` is the screen once that step finished, saved as a JPEG in a folder named after the test. When a step causes a page change, it and the following "Opened" step share the new page's screenshot.
 - `attempts` appears when Pest retried an action. `failed` marks a step that never worked.
 - Problem kinds are `console` (console errors), `error` (uncaught exceptions), `http` (responses of 400 or above) and `network` (requests that failed). Repeats are counted, not listed again.
 
-`vendor/bin/pr-proof-compress input.webm output.mp4` turns a recording into a trimmed MP4. If `input.json` exists, it also writes `output.json` with the times shifted to match the trimmed video.
+`vendor/bin/pr-proof-compress input.webm output.mp4` turns a recording into a trimmed MP4. If `input.json` exists, it also writes `output.mp4.json` with the times shifted to match the trimmed video.
 
-## Compare with the base branch
+## Compare approved flows
 
-Record the same tests on the PR's base branch into a second folder, then:
+The service compares PR videos with the latest completed default-branch recording of the same flow. It shows baseline and PR videos side by side with paired playback controls, ordered actions and new or fixed browser problems. A flow without an approved recording gets a "New flow" label.
 
-```bash
-vendor/bin/pr-proof-compare base-videos/ tests/Browser/Videos/
-```
+Each flow key is the recording filename without `.webm`. Renaming a test changes its filename and starts a new flow for now. Keep the same recording workflow for baseline uploads: its GitHub `run_number` orders approvals so a slower, older run cannot replace a newer baseline.
 
-For each test it writes `<test>.compare.json`:
-
-```json
-{
-  "base_available": true,
-  "steps": [
-    {
-      "status": "changed",
-      "text": "Opened /tutor/ground-rules",
-      "changed_pixels": 0.00266,
-      "base": { "at": 0.28, "screenshot": "<test>/base/01.jpg" },
-      "head": { "at": 0.28, "screenshot": "<test>/01.jpg" },
-      "highlight": "<test>/changes/01.jpg"
-    },
-    { "status": "same", "text": "Opened /tutor/dashboard", "changed_pixels": 0.0 }
-  ],
-  "new_problems": [],
-  "fixed_problems": []
-}
-```
-
-- Steps from both runs are matched by caption. `status` is `same`, `changed` (the screen differs), `added` (only in the PR) or `removed` (only on the base branch).
-- `changed_pixels` is the share of the screen that differs. Identical screens score `0.0`. A screen counts as changed above 0.05%.
-- `highlight` is the PR's screenshot with the changed areas painted red.
-- `new_problems` and `fixed_problems` compare browser problems between the runs, ignoring hosts and ports that change every run.
-- Base screenshots are copied into the PR's video folder, so one folder holds everything to upload.
-- Needs `ffmpeg` and `python3`.
+Completing a PR run pins its baseline videos. Later approvals do not change that comparison. This compares videos and browser actions; it does not calculate visual differences.
 
 ## Post videos on pull requests
 
@@ -109,10 +80,11 @@ jobs:
 
       # ...start your app and install Playwright here...
 
-      - if: steps.select.outputs.tests != ''
+      - id: record
+        if: steps.select.outputs.tests != ''
         run: ./vendor/bin/pest --record-videos --record-videos-only=${{ steps.select.outputs.tests }}
 
-      - if: steps.select.outputs.tests != ''
+      - if: success() && steps.record.outcome == 'success'
         uses: wardy484/pr-proof/publish@main
         with:
           url: https://your-pr-proof-host
@@ -125,7 +97,39 @@ jobs:
 Browser videos: tests/Browser/CheckoutTest.php, tests/Browser/BookingTest.php
 ```
 
-`publish` uploads each video to the pr-proof service and keeps one comment on the PR up to date. The comment shows a still from each test and links to a page where every video plays with normal controls. Videos are kept for 30 days.
+`publish` uploads each video to the pr-proof service and keeps one comment on the PR up to date. The comment shows a still from each test and links to a page where every video plays with normal controls. PR runs are kept for 30 days. Current approved videos and baselines referenced by retained PR runs survive pruning.
+
+## Record approved baselines
+
+Add default-branch recording to the same recording workflow. Replace `main` below if your default branch has another name. Record the approved flows after booting the app, then publish only if the recording step passed:
+
+```yaml
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  baselines:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      # ...install dependencies, start your app and install Playwright...
+      - id: record
+        run: ./vendor/bin/pest tests/Browser --record-videos
+      - if: success() && steps.record.outcome == 'success'
+        uses: wardy484/pr-proof/publish@main
+        with:
+          mode: baseline
+          url: https://your-pr-proof-host
+          api-token: ${{ secrets.PR_PROOF_TOKEN }}
+```
+
+`mode` defaults to `pull_request`. Baseline mode accepts only `push` or `workflow_dispatch` on the repository's default branch and never posts a PR comment. The workflow must check the recording step's outcome, including when it uses `continue-on-error`. Clear the video directory before recording on persistent runners to avoid uploading files from an earlier run.
+
+The publisher creates a run with its kind, commit SHA and branch. Baselines also send `source_order` from `github.run_number`. Each upload includes the filename-stem `flow_key`, MP4, JPEG poster and compressed JSON telemetry. Recordings without telemetry send empty steps and problems for compatibility. It calls `/api/runs/{id}/complete` with `expected_videos` only after every upload succeeds. Failed or partial baseline runs never become approved. Completed runs are immutable.
 
 ## Licence
 

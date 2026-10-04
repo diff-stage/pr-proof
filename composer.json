@@ -17,8 +17,7 @@
         ]
     },
     "bin": [
-        "bin/pr-proof-compress",
-        "bin/pr-proof-compare"
+        "bin/pr-proof-compress"
     ],
     "extra": {
         "pest": {
