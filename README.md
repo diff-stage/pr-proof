@@ -68,7 +68,7 @@ For each test it writes `<test>.compare.json`:
       "status": "changed",
       "text": "Opened /tutor/ground-rules",
       "changed_pixels": 0.00266,
-      "base": { "at": 0.28, "screenshot": "base/<test>/01.jpg" },
+      "base": { "at": 0.28, "screenshot": "<test>/base/01.jpg" },
       "head": { "at": 0.28, "screenshot": "<test>/01.jpg" },
       "highlight": "<test>/changes/01.jpg"
     },
