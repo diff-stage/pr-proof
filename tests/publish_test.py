@@ -1,4 +1,5 @@
 """Exercise the actual publisher against an HTTP server and command boundaries."""
+from html.parser import HTMLParser
 import json
 import os
 from pathlib import Path
@@ -63,7 +64,15 @@ class PublishTest(unittest.TestCase):
         for name in ('checkout', 'booking'):
             (self.path / f'{name}.webm').write_bytes(b'video')
         self.stub('ffmpeg', 'touch "${@: -1}"')
-        self.stub('gh', 'echo "$*" >> "$GH_LOG"')
+        self.stub('gh', '''echo "$*" >> "$GH_LOG"
+for arg in "$@"; do
+  if [[ "$arg" == body=@* ]]; then
+    cp "${arg#body=@}" "$COMMENT_FILE"
+  fi
+done
+if [[ "${1:-}" == pr ]]; then
+  cp "${@: -1}" "$COMMENT_FILE"
+fi''')
         self.stub('compress', '''cp "$1" "$2"
 printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.json"''')
         self.env = dict(os.environ, PATH=f'{self.path}:{os.environ["PATH"]}', MODE='pull_request',
@@ -72,7 +81,8 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
                         RUN_NUMBER='23', RECORDING_ID='100:1', RECORDING_SHA='b' * 40, VIDEOS=str(self.path),
                         COMPRESS=str(self.path / 'compress'), PR_PROOF_TOKEN='test',
                         PR_PROOF_URL=f'http://127.0.0.1:{self.server.server_port}',
-                        GITHUB_REPOSITORY='owner/repo', GH_LOG=str(self.path / 'gh.log'))
+                        GITHUB_REPOSITORY='owner/repo', GH_LOG=str(self.path / 'gh.log'),
+                        COMMENT_FILE=str(self.path / 'comment.md'))
 
     def stub(self, name, body):
         file = self.path / name
@@ -146,6 +156,45 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
             self.assertIn(b'"at":0.5', body)
         self.assertEqual(json.loads(self.requests[-1][1]), {'expected_videos': 2})
         self.assertIn('pr comment 42', (self.path / 'gh.log').read_text())
+
+    def test_comment_limits_previews_and_preserves_titles_as_text(self):
+        titles = {
+            f'{name}.webm': f'{name} with dataset "mobile" & <script> [example] | \'quoted\''
+            for name in ('booking', 'checkout', 'login', 'settings', 'signup')
+        }
+        for name in ('login', 'settings', 'signup'):
+            (self.path / f'{name}.webm').write_bytes(b'video')
+        (self.path / 'titles.json').write_text(json.dumps(titles))
+        result = self.run_publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = (self.path / 'comment.md').read_text()
+        self.assertTrue(body.startswith('<!-- pr-proof -->'))
+        self.assertIn('Watch all 5 on pr-proof', body)
+        self.assertIn('<summary>All browser tests (5)</summary>', body)
+        images, links, text = [], [], []
+
+        class Parser(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                if tag == 'img':
+                    images.append(dict(attrs))
+                if tag == 'a':
+                    links.append(dict(attrs))
+                self.assert_safe_tag(tag)
+
+            def assert_safe_tag(self, tag):
+                if tag == 'script':
+                    raise AssertionError('Test title became an HTML element')
+
+            def handle_data(self, data):
+                text.append(data)
+
+        Parser().feed(body)
+        self.assertEqual(len(images), 3)
+        self.assertEqual(len(links), 8)
+        for image, title in zip(images, titles.values()):
+            self.assertEqual(image, {'src': 'http://poster', 'height': '120', 'alt': title})
+        for title in titles.values():
+            self.assertIn(title, text)
 
     def test_baseline_metadata_and_no_comment(self):
         result = self.run_publish(MODE='baseline')

@@ -47,7 +47,9 @@ run=$(api -X POST "${PR_PROOF_URL%/}/api/runs" \
 run_id=$(jq -r .id <<< "$run")
 run_url=$(jq -r .url <<< "$run")
 
-cells=''
+previews=''
+links=''
+preview_count=0
 for video in "${videos[@]}"; do
   name=$(basename "$video" .webm)
   title=$(jq -r --arg f "$name.webm" '.[$f] // empty' "$VIDEOS/titles.json" 2>/dev/null || true)
@@ -63,8 +65,15 @@ for video in "${videos[@]}"; do
 
   uploaded=$(api -X POST "${PR_PROOF_URL%/}/api/runs/$run_id/videos" \
     -F "name=$title" -F "flow_key=$name" -F "telemetry=@$telemetry;type=application/json" -F "video=@$mp4;type=video/mp4" -F "poster=@$poster;type=image/jpeg")
-  cells+=$(printf '<a href="%s"><img src="%s" width="280" alt="%s"></a> ' \
-    "$(jq -r .url <<< "$uploaded")" "$(jq -r .poster_url <<< "$uploaded")" "${title//\"/&quot;}")
+  video_url=$(jq -r '.url | @html' <<< "$uploaded")
+  poster_url=$(jq -r '.poster_url | @html' <<< "$uploaded")
+  escaped_title=$(jq -nr --arg title "$title" '$title | @html')
+  if (( preview_count < 3 )); then
+    previews+=$(printf '<td><a href="%s"><img src="%s" height="120" alt="%s"></a></td>' \
+      "$video_url" "$poster_url" "$escaped_title")
+    preview_count=$(( preview_count + 1 ))
+  fi
+  links+=$(printf '<li><a href="%s">%s</a></li>' "$video_url" "$escaped_title")
 done
 
 api -X POST "${PR_PROOF_URL%/}/api/runs/$run_id/complete" \
@@ -83,7 +92,14 @@ trap 'rm -f "$body"' EXIT
   echo
   echo "**[Watch all ${#videos[@]} on pr-proof]($run_url)**"
   echo
-  echo "$cells"
+  echo "<table><tr>$previews</tr></table>"
+  echo
+  echo '<details>'
+  echo "<summary>All browser tests (${#videos[@]})</summary>"
+  echo
+  echo "<ol>$links</ol>"
+  echo
+  echo '</details>'
 } > "$body"
 
 existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
