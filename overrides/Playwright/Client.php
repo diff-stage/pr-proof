@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pest\Browser\Playwright;
 
 use PrProof\Recorder;
+use PrProof\Telemetry;
 use Amp\Websocket\Client\WebsocketConnection;
 use Generator;
 use Pest\Browser\Exceptions\PlaywrightOutdatedException;
@@ -87,7 +88,11 @@ final class Client
             'metadata' => $meta,
         ]);
 
-        if (Recorder::enabled() && in_array($method, self::PAUSED_ACTIONS, true) && Recorder::pathForCurrentTest() !== null) {
+        Telemetry::action($method, $params);
+
+        $retry = Telemetry::isRetry($method, $params);
+
+        if (! $retry && Recorder::enabled() && in_array($method, self::PAUSED_ACTIONS, true) && Recorder::pathForCurrentTest() !== null) {
             usleep(Recorder::pause() * 1000);
         }
 
@@ -98,12 +103,18 @@ final class Client
             /** @var array{id: string|null, params: array{add: string|null}, error: array{error: array{message: string|null}}} $response */
             $response = json_decode($responseJson, true);
 
+            if (is_array($response)) {
+                Telemetry::observe($response);
+            }
+
             if (isset($response['error']['error']['message'])) {
                 $message = $response['error']['error']['message'];
 
                 if (str_contains($message, 'Playwright was just installed or updated')) {
                     throw new PlaywrightOutdatedException();
                 }
+
+                Telemetry::actionFailed();
 
                 throw new ExpectationFailedException($message);
             }

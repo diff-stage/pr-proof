@@ -26,7 +26,28 @@ Requires `pestphp/pest-plugin-browser` 4.3.1. pr-proof replaces three of its int
 
 Each test is saved as its own `.webm`, named after the test. Without `--record-videos`, Pest runs exactly as before.
 
-`vendor/bin/pr-proof-compress input.webm output.mp4` turns a recording into a trimmed MP4.
+Next to each video, pr-proof writes a `.json` file with what happened during the test:
+
+```json
+{
+  "steps": [
+    { "at": 0.26, "text": "Opened /tutor/ground-rules" },
+    { "at": 0.56, "text": "Ticked \"Safeguarding\"" },
+    { "at": 3.4, "text": "Clicked \"Log in\"", "attempts": 19, "failed": true }
+  ],
+  "problems": [
+    { "at": 2.37, "kind": "console", "text": "Something broke in the widget" },
+    { "at": 2.38, "kind": "http", "text": "404 GET /definitely-missing-endpoint", "count": 2 }
+  ]
+}
+```
+
+- `at` is seconds into the video.
+- Steps come from clicks, ticks, typing and page changes. Typing into password, card or token fields doesn't show the value.
+- `attempts` appears when Pest retried an action. `failed` marks a step that never worked.
+- Problem kinds are `console` (console errors), `error` (uncaught exceptions), `http` (responses of 400 or above) and `network` (requests that failed). Repeats are counted, not listed again.
+
+`vendor/bin/pr-proof-compress input.webm output.mp4` turns a recording into a trimmed MP4. If `input.json` exists, it also writes `output.json` with the times shifted to match the trimmed video.
 
 ## Post videos on pull requests
 

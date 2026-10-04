@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pest\Browser\Playwright;
 
 use Exception;
+use PrProof\Telemetry;
 
 /**
  * @internal
@@ -107,11 +108,28 @@ final class Context
         return $this;
     }
 
+    /**
+     * Asks the browser to report console messages and network results for this context.
+     */
+    public function subscribeToProblems(): self
+    {
+        foreach (['console', 'request', 'response', 'requestFailed'] as $event) {
+            iterator_to_array($this->sendMessage('updateSubscription', ['event' => $event, 'enabled' => true]));
+        }
+
+        return $this;
+    }
+
     private function saveVideos(): void
     {
         if ($this->videoPath === null) {
             return;
         }
+
+        file_put_contents(
+            (string) preg_replace('/\.webm$/', '.json', $this->videoPath),
+            (string) json_encode(Telemetry::finish(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        );
 
         foreach ($this->videoArtifacts as $index => $artifact) {
             $path = $index === 0 ? $this->videoPath : preg_replace('/\.webm$/', '-'.($index + 1).'.webm', $this->videoPath);

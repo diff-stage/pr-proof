@@ -11,6 +11,7 @@ use Pest\Browser\Playwright\InitScript;
 use Pest\Browser\Playwright\Playwright;
 use Pest\Browser\Support\ComputeUrl;
 use PrProof\Recorder;
+use PrProof\Telemetry;
 
 /**
  * @mixin Webpage|AwaitableWebpage
@@ -176,6 +177,8 @@ final class PendingAwaitablePage
         $video = Recorder::pathForCurrentTest();
 
         if ($video !== null) {
+            Telemetry::begin();
+
             $viewport = $options['viewport'] ?? $this->device->context()['viewport'];
             $scale = min(1, 1280 / $viewport['width']);
 
@@ -196,7 +199,7 @@ final class PendingAwaitablePage
         $context->addInitScript(InitScript::get());
 
         if ($video !== null) {
-            $context->recordTo($video);
+            $context->recordTo($video)->subscribeToProblems();
             $context->addInitScript(Recorder::cursorOverlay());
             unset($options['recordVideo']);
         }
