@@ -246,15 +246,22 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         self.assertNotIn('ignored', text)
 
     def test_review_examples_in_code_blocks_are_ignored(self):
-        body = '\n'.join([
-            'Format:', '```markdown', 'Browser review:', '1. `checkout`: Example only.', '```',
-            '', 'Browser review:', '1. `booking`: The real reason.',
-        ])
-        result = self.run_publish(PR_BODY=body)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        booking, checkout = self.uploads()
-        self.assertEqual(form_field(booking, 'review_reason'), 'The real reason.')
-        self.assertNotIn(b'review_', checkout)
+        example = ['Browser review:', '1. `checkout`: Example only.']
+        fenced = {
+            'backticks': ['```markdown', *example, '```'],
+            'nested fence': ['````markdown', '```markdown', *example, '```', '````'],
+            'tilde fence': ['~~~', '```', *example, '~~~~'],
+            'closer with text': ['```', '``` not a closer', *example, '```'],
+        }
+        for name, lines in fenced.items():
+            with self.subTest(name):
+                self.requests.clear()
+                body = '\n'.join(['Format:', *lines, '', 'Browser review:', '1. `booking`: The real reason.'])
+                result = self.run_publish(PR_BODY=body)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                booking, checkout = self.uploads()
+                self.assertEqual(form_field(booking, 'review_reason'), 'The real reason.')
+                self.assertNotIn(b'review_', checkout)
 
     def test_review_notes_only_change_pull_request_runs(self):
         result = self.run_publish(MODE='baseline', PR_BODY='Browser review:\n1. `booking` — Reason.')

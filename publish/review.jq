@@ -6,10 +6,21 @@
 # Outputs [{flow_key, reason, order}] in list order, first entry per flow key.
 def item: "^\\s*\\d+[.)]\\s+`(?<flow_key>[^`]+)`\\s*(?:—|–|-|:)\\s*(?<reason>\\S.*?)\\s*$";
 
-# Lines inside fenced code blocks are examples, so they never count.
-[foreach (split("\n")[] | rtrimstr("\r")) as $line (false;
-  if $line | test("^\\s*(```|~~~)") then not else . end;
-  if $line | test("^\\s*(```|~~~)") then null elif . then null else $line end)] as $lines
+def fence: [capture("^\\s*(?<marks>`{3,}|~{3,})(?<info>.*)$")][0];
+
+# Lines inside fenced code blocks are examples, so they never count. Only a
+# fence of the same character, at least as long and with nothing after it,
+# closes the block.
+[foreach (split("\n")[] | rtrimstr("\r")) as $line ({open: null};
+  .open as $open | ($line | fence) as $fence
+  | if $open == null then
+      if $fence != null and ($fence.marks[:1] == "~" or ($fence.info | contains("`") | not))
+      then {open: $fence.marks, line: null} else {open: null, line: $line} end
+    elif $fence != null and $fence.marks[:1] == $open[:1]
+      and ($fence.marks | length) >= ($open | length) and ($fence.info | test("^\\s*$"))
+    then {open: null, line: null}
+    else {open: $open, line: null} end;
+  .line)] as $lines
 | ($lines | map(. != null and test("^browser review:\\s*$"; "i")) | index(true)) as $start
 | if $start == null then [] else
     [label $done | $lines[$start + 1:][]
