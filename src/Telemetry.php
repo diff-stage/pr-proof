@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PrProof;
 
+use Pest\Browser\Playwright\Client;
+
 /**
  * Collects what happened during one recorded test: the steps a reviewer
  * would describe, and any problems the browser reported along the way.
@@ -14,8 +16,14 @@ final class Telemetry
 
     private static ?float $startedAt = null;
 
+    private static ?string $videoPath = null;
+
+    private static ?string $pageGuid = null;
+
+    private static bool $capturing = false;
+
     /**
-     * @var array<int, array{at: float, text: string, attempts?: int, failed?: bool}>
+     * @var array<int, array{at: float, text: string, attempts?: int, failed?: bool, screenshot?: string}>
      */
     private static array $steps = [];
 
@@ -40,9 +48,11 @@ final class Telemetry
 
     private static bool $lastActionFailed = false;
 
-    public static function begin(): void
+    public static function begin(string $videoPath): void
     {
         self::$startedAt = microtime(true);
+        self::$videoPath = $videoPath;
+        self::$pageGuid = null;
         self::$steps = [];
         self::$problems = [];
         self::$requests = [];
@@ -55,6 +65,56 @@ final class Telemetry
     public static function active(): bool
     {
         return self::$startedAt !== null;
+    }
+
+    /**
+     * Screenshots the page for every step that does not have one yet, so each
+     * step shows the screen once that step has finished.
+     */
+    public static function captureScreen(): void
+    {
+        if (! self::active() || self::$capturing || self::$pageGuid === null || self::$videoPath === null) {
+            return;
+        }
+
+        $pending = array_keys(array_filter(self::$steps, static fn (array $step): bool => ! isset($step['screenshot'])));
+
+        if ($pending === []) {
+            return;
+        }
+
+        self::$capturing = true;
+
+        try {
+            $binary = null;
+
+            foreach (Client::instance()->execute(self::$pageGuid, 'screenshot', ['type' => 'jpeg', 'quality' => 70, 'scale' => 'css']) as $message) {
+                if (isset($message['result']['binary'])) {
+                    $binary = base64_decode((string) $message['result']['binary']);
+                }
+            }
+        } catch (\Throwable) {
+            $binary = null;
+        } finally {
+            self::$capturing = false;
+        }
+
+        if ($binary === null) {
+            return;
+        }
+
+        $directory = (string) preg_replace('/\.webm$/', '', self::$videoPath);
+
+        if (! is_dir($directory)) {
+            mkdir($directory, 0777, true);
+        }
+
+        $file = sprintf('%02d.jpg', end($pending) + 1);
+        file_put_contents("{$directory}/{$file}", $binary);
+
+        foreach ($pending as $index) {
+            self::$steps[$index]['screenshot'] = basename($directory)."/{$file}";
+        }
     }
 
     /**
@@ -131,7 +191,7 @@ final class Telemetry
     }
 
     /**
-     * @return array{steps: array<int, array{at: float, text: string, attempts?: int, failed?: bool}>, problems: array<int, array{at: float, kind: string, text: string, count?: int}>}
+     * @return array{steps: array<int, array{at: float, text: string, attempts?: int, failed?: bool, screenshot?: string}>, problems: array<int, array{at: float, kind: string, text: string, count?: int}>}
      */
     public static function finish(): array
     {
@@ -157,6 +217,7 @@ final class Telemetry
 
         if ($type === 'Page' && isset($initializer['mainFrame']['guid'])) {
             self::$mainFrames[(string) $initializer['mainFrame']['guid']] = true;
+            self::$pageGuid ??= $guid;
         }
 
         if ($type === 'Request') {

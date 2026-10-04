@@ -88,13 +88,14 @@ final class Client
             'metadata' => $meta,
         ]);
 
-        Telemetry::action($method, $params);
-
         $retry = Telemetry::isRetry($method, $params);
 
         if (! $retry && Recorder::enabled() && in_array($method, self::PAUSED_ACTIONS, true) && Recorder::pathForCurrentTest() !== null) {
             usleep(Recorder::pause() * 1000);
+            Telemetry::captureScreen();
         }
+
+        Telemetry::action($method, $params);
 
         $this->websocketConnection->sendText($requestJson);
 

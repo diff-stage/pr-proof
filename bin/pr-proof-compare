@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Compare browser test recordings from the base branch with the pull request.
+
+Usage: pr-proof-compare BASE_DIR HEAD_DIR
+
+For every recorded test in HEAD_DIR, writes <test>.compare.json next to it:
+steps from both runs matched by their captions, whether each screen changed,
+and which browser problems are new or fixed. Base screenshots are copied into
+HEAD_DIR/<test>/base/ so one directory holds everything to publish.
+"""
+
+import difflib
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+CHANGED_ABOVE = 0.0005  # share of pixels that must differ before a screen counts as changed
+PIXEL_THRESHOLD = 6      # how different a pixel must be (0-255) to count; identical renders differ by 0
+
+
+def load(path):
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def changed_share(base, head, highlight):
+    """Share of pixels that differ between two screenshots. Writes a copy of the
+    head screenshot with the changed pixels painted red."""
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", str(head), "-i", str(base),
+         "-lavfi", f"[1][0]scale2ref[b][h];[b][h]blend=all_mode=difference,format=gray,lut=y='if(gt(val,{PIXEL_THRESHOLD}),255,0)',signalstats,metadata=print:key=lavfi.signalstats.YAVG",
+         "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    match = re.search(r"YAVG=([0-9.]+)", result.stderr)
+    share = round(float(match.group(1)) / 255, 5) if match else None
+
+    if share and share > CHANGED_ABOVE:
+        highlight.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-i", str(head), "-i", str(base),
+             "-filter_complex",
+             f"[1][0]scale2ref[b][h];[h]split[h1][h2];[b][h1]blend=all_mode=difference,format=gray,lut=y='if(gt(val,{PIXEL_THRESHOLD}),170,0)',dilation,dilation[m];"
+             "[h2]format=rgba,split[h3][h4];[h4]drawbox=c=red:t=fill[red];[red][m]alphamerge[overlay];[h3][overlay]overlay,format=yuv420p",
+             "-frames:v", "1", "-q:v", "4", str(highlight)],
+            capture_output=True,
+        )
+
+    return share
+
+
+def problem_key(problem):
+    """Problems match across runs once hosts and ports, which change every run, are removed."""
+    return problem["kind"], re.sub(r"https?://[^/\s'\"]+", "", problem["text"])
+
+
+def side(step, directory, prefix=""):
+    if step is None:
+        return None
+    entry = {"at": step["at"]}
+    if step.get("screenshot"):
+        entry["screenshot"] = prefix + step["screenshot"]
+    return entry
+
+
+def compare(name, base_dir, head_dir):
+    head = load(head_dir / f"{name}.json")
+    base = load(base_dir / f"{name}.json")
+
+    result = {"base_available": base is not None, "steps": [], "new_problems": [], "fixed_problems": []}
+
+    if base is None:
+        result["steps"] = [{"status": "added", "text": s["text"], "head": side(s, head_dir)} for s in head["steps"]]
+        result["new_problems"] = head["problems"]
+        return result
+
+    if (base_dir / name).is_dir():
+        shutil.copytree(base_dir / name, head_dir / name / "base", dirs_exist_ok=True)
+
+    base_steps, head_steps = base["steps"], head["steps"]
+    matcher = difflib.SequenceMatcher(a=[s["text"] for s in base_steps], b=[s["text"] for s in head_steps], autojunk=False)
+
+    for tag, b1, b2, h1, h2 in matcher.get_opcodes():
+        if tag == "equal":
+            for b, h in zip(base_steps[b1:b2], head_steps[h1:h2]):
+                row = {"status": "same", "text": h["text"], "base": side(b, base_dir, "base/"), "head": side(h, head_dir)}
+                if b.get("screenshot") and h.get("screenshot"):
+                    highlight = head_dir / name / "changes" / Path(h["screenshot"]).name
+                    share = changed_share(base_dir / b["screenshot"], head_dir / h["screenshot"], highlight)
+                    row["changed_pixels"] = share
+                    if share is not None and share > CHANGED_ABOVE:
+                        row["status"] = "changed"
+                        row["highlight"] = f"{name}/changes/{highlight.name}"
+                result["steps"].append(row)
+            continue
+
+        for b in base_steps[b1:b2]:
+            result["steps"].append({"status": "removed", "text": b["text"], "base": side(b, base_dir, "base/")})
+        for h in head_steps[h1:h2]:
+            result["steps"].append({"status": "added", "text": h["text"], "head": side(h, head_dir)})
+
+    base_keys = {problem_key(p) for p in base["problems"]}
+    head_keys = {problem_key(p) for p in head["problems"]}
+    result["new_problems"] = [p for p in head["problems"] if problem_key(p) not in base_keys]
+    result["fixed_problems"] = [p for p in base["problems"] if problem_key(p) not in head_keys]
+
+    return result
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+
+    base_dir, head_dir = Path(sys.argv[1]), Path(sys.argv[2])
+
+    for recording in sorted(head_dir.glob("*.json")):
+        if recording.name == "titles.json" or recording.name.endswith(".compare.json"):
+            continue
+
+        name = recording.stem
+        result = compare(name, base_dir, head_dir)
+        (head_dir / f"{name}.compare.json").write_text(json.dumps(result, indent=2, ensure_ascii=False))
+
+        changed = sum(1 for s in result["steps"] if s["status"] != "same")
+        print(f"{name}: {changed} of {len(result['steps'])} steps differ, {len(result['new_problems'])} new problems")
+
+
+if __name__ == "__main__":
+    main()

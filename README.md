@@ -44,10 +44,47 @@ Next to each video, pr-proof writes a `.json` file with what happened during the
 
 - `at` is seconds into the video.
 - Steps come from clicks, ticks, typing and page changes. Typing into password, card or token fields doesn't show the value.
+- `screenshot` is the screen once that step finished, saved as a JPEG in a folder named after the test. When a step causes a page change, it and the following "Opened" step share the new page's screenshot.
 - `attempts` appears when Pest retried an action. `failed` marks a step that never worked.
 - Problem kinds are `console` (console errors), `error` (uncaught exceptions), `http` (responses of 400 or above) and `network` (requests that failed). Repeats are counted, not listed again.
 
 `vendor/bin/pr-proof-compress input.webm output.mp4` turns a recording into a trimmed MP4. If `input.json` exists, it also writes `output.json` with the times shifted to match the trimmed video.
+
+## Compare with the base branch
+
+Record the same tests on the PR's base branch into a second folder, then:
+
+```bash
+vendor/bin/pr-proof-compare base-videos/ tests/Browser/Videos/
+```
+
+For each test it writes `<test>.compare.json`:
+
+```json
+{
+  "base_available": true,
+  "steps": [
+    {
+      "status": "changed",
+      "text": "Opened /tutor/ground-rules",
+      "changed_pixels": 0.00266,
+      "base": { "at": 0.28, "screenshot": "base/<test>/01.jpg" },
+      "head": { "at": 0.28, "screenshot": "<test>/01.jpg" },
+      "highlight": "<test>/changes/01.jpg"
+    },
+    { "status": "same", "text": "Opened /tutor/dashboard", "changed_pixels": 0.0 }
+  ],
+  "new_problems": [],
+  "fixed_problems": []
+}
+```
+
+- Steps from both runs are matched by caption. `status` is `same`, `changed` (the screen differs), `added` (only in the PR) or `removed` (only on the base branch).
+- `changed_pixels` is the share of the screen that differs. Identical screens score `0.0`. A screen counts as changed above 0.05%.
+- `highlight` is the PR's screenshot with the changed areas painted red.
+- `new_problems` and `fixed_problems` compare browser problems between the runs, ignoring hosts and ports that change every run.
+- Base screenshots are copied into the PR's video folder, so one folder holds everything to upload.
+- Needs `ffmpeg` and `python3`.
 
 ## Post videos on pull requests
 

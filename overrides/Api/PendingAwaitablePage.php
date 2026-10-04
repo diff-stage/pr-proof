@@ -177,7 +177,7 @@ final class PendingAwaitablePage
         $video = Recorder::pathForCurrentTest();
 
         if ($video !== null) {
-            Telemetry::begin();
+            Telemetry::begin($video);
 
             $viewport = $options['viewport'] ?? $this->device->context()['viewport'];
             $scale = min(1, 1280 / $viewport['width']);
