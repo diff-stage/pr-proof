@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Turn a raw browser test recording into an MP4 a reviewer can follow.
+# Usage: pr-proof-compress input.webm output.mp4
+set -euo pipefail
+
+input=$1
+output=$2
+
+# Skip the blank page before the first load and after the context closes.
+white=$(ffmpeg -hide_banner -i "$input" -vf "negate,blackdetect=d=0.04:pix_th=0.06" -an -f null - 2>&1 \
+    | sed -n 's/.*black_start:\([0-9.]*\) black_end:\([0-9.]*\).*/\1 \2/p')
+duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$input")
+start=0
+end=$duration
+while read -r from to; do
+    [[ -z "$from" ]] && continue
+    if awk "BEGIN { exit !($from < 0.1) }"; then start=$to; fi
+    if awk "BEGIN { exit !($to > $duration - 0.1 && $from > $start) }"; then end=$from; fi
+done <<< "$white"
+
+# Keep real speed and hold the last frame for a second so the result is readable.
+ffmpeg -v error -y -ss "$start" -to "$end" -i "$input" \
+    -vf "tpad=stop_mode=clone:stop_duration=1,format=yuv420p" \
+    -r 25 -an -c:v libx264 -crf 28 -movflags +faststart "$output"

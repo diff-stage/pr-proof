@@ -1,0 +1,74 @@
+name: pr-proof publish
+description: Upload recorded browser test videos and post them on the pull request.
+
+inputs:
+  videos:
+    description: Directory containing the recorded .webm files.
+    default: tests/Browser/Videos
+  bucket:
+    description: S3 bucket for the videos.
+    required: true
+  prefix:
+    description: Key prefix inside the bucket.
+    default: pr-proof
+  expires-in:
+    description: Seconds the video links stay valid (max 604800).
+    default: '604800'
+  token:
+    description: Token that can comment on the pull request.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        VIDEOS: ${{ inputs.videos }}
+        BUCKET: ${{ inputs.bucket }}
+        PREFIX: ${{ inputs.prefix }}
+        EXPIRES: ${{ inputs.expires-in }}
+        COMPRESS: ${{ github.action_path }}/../bin/pr-proof-compress
+      run: |
+        shopt -s nullglob
+        videos=("$VIDEOS"/*.webm)
+        if (( ${#videos[@]} == 0 )); then echo "No videos recorded"; exit 0; fi
+
+        command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; }
+        target="s3://${BUCKET}/${PREFIX}/${HEAD_SHA}"
+        body=$(mktemp)
+        {
+          echo '<!-- pr-proof -->'
+          echo "### Browser test videos for ${HEAD_SHA::7}"
+          echo
+          echo 'Recorded from the browser tests this PR changes, plus any listed after `Browser videos:` in the description.'
+          echo
+        } > "$body"
+
+        for video in "${videos[@]}"; do
+          name=$(basename "$video" .webm)
+          mp4="${video%.webm}.mp4"
+          gif="${video%.webm}.gif"
+
+          bash "$COMPRESS" "$video" "$mp4"
+          ffmpeg -v error -y -i "$mp4" \
+            -vf "fps=12,scale=560:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128[p];[b][p]paletteuse" -loop -1 "$gif"
+
+          aws s3 cp "$mp4" "${target}/${name}.mp4" --content-type video/mp4 --no-progress
+          aws s3 cp "$gif" "${target}/${name}.gif" --content-type image/gif --no-progress
+
+          mp4_url=$(aws s3 presign "${target}/${name}.mp4" --expires-in "$EXPIRES")
+          gif_url=$(aws s3 presign "${target}/${name}.gif" --expires-in "$EXPIRES")
+          printf '<details><summary>%s</summary>\n\n<a href="%s"><img src="%s" width="560"></a>\n\n[Full video](%s)\n</details>\n\n' \
+            "$name" "$mp4_url" "$gif_url" "$mp4_url" >> "$body"
+        done
+
+        existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+          --jq '.[] | select(.body | startswith("<!-- pr-proof -->")) | .id' | tail -n 1)
+        if [[ -n "$existing" ]]; then
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@"$body" >/dev/null
+        else
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$body"
+        fi
