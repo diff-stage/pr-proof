@@ -30,7 +30,7 @@ Commit first so the recording matches a SHA. Then, with a clean working tree:
 ```bash
 rm -rf tests/Browser/Videos
 ./vendor/bin/pest --record-videos --record-videos-only=tests/Browser/BookingTest.php,tests/Browser/CheckoutTest.php
-git rev-parse --short HEAD
+git rev-parse HEAD | cut -c1-7
 ```
 
 - `--record-videos-only` takes comma-separated paths relative to the project root.
@@ -64,4 +64,4 @@ Not shown: the confirmation email has no browser surface. `tests/Feature/Booking
 
 ## 5. Check CI evidence matches the head
 
-Editing the description re-runs the workflow when it listens for `edited`. After CI finishes, the pr-proof comment's heading names the commit: `Browser test videos for abc1234`. Confirm it matches `git rev-parse --short HEAD` and that each reviewed video appears under "What to check". If the recording failed, the comment is missing, or it names an older commit, say so in your handoff. Don't describe the evidence as current until it is.
+Editing the description re-runs the workflow when it listens for `edited`. After CI finishes, the pr-proof comment's heading names the commit: `Browser test videos for abc1234`. Confirm it matches `git rev-parse HEAD | cut -c1-7` and that each reviewed video appears under "What to check". If the recording failed, the comment is missing, or it names an older commit, say so in your handoff. Don't describe the evidence as current until it is.

@@ -10,6 +10,7 @@ it('records real typing and clicking', function () {
     $page = visit(getenv('PR_PROOF_TEST_URL').'/?token=query-secret');
     $page->assertSee('Recorder compatibility')
         ->type('message', 'Compatibility verified')
+        ->keys('message', ['7'])
         ->click('Save message')
         ->assertSeeIn('#result', 'Compatibility verified')
         ->assertNoJavaScriptErrors();

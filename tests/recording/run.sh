@@ -25,7 +25,8 @@ foreach ($files as $file) {
     if ($data["problems"] !== []) throw new RuntimeException("Unexpected browser problems");
     $text = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (str_contains($text, "query-secret") || str_contains($text, "Compatibility verified")) throw new RuntimeException("Telemetry kept a typed or query value");
-    if (! str_contains($text, "Opened /?token=…")) throw new RuntimeException("Missing redacted page step");
+    if (! str_contains($text, "Opened /?token=…") || ! str_contains($text, "Pressed a key")) throw new RuntimeException("Missing redacted steps");
+    if (str_contains($text, "Pressed 7")) throw new RuntimeException("Telemetry kept a pressed character");
 }
 '
 for video in videos/*.webm; do

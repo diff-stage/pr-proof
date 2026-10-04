@@ -245,6 +245,17 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         self.assertEqual([image['alt'] for image in comment.images], ['checkout', 'booking'])
         self.assertNotIn('ignored', text)
 
+    def test_review_examples_in_code_blocks_are_ignored(self):
+        body = '\n'.join([
+            'Format:', '```markdown', 'Browser review:', '1. `checkout`: Example only.', '```',
+            '', 'Browser review:', '1. `booking`: The real reason.',
+        ])
+        result = self.run_publish(PR_BODY=body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        booking, checkout = self.uploads()
+        self.assertEqual(form_field(booking, 'review_reason'), 'The real reason.')
+        self.assertNotIn(b'review_', checkout)
+
     def test_review_notes_only_change_pull_request_runs(self):
         result = self.run_publish(MODE='baseline', PR_BODY='Browser review:\n1. `booking` — Reason.')
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -43,7 +43,7 @@ Next to each video, pr-proof writes a `.json` file with what happened during the
 ```
 
 - `at` is seconds into the video.
-- Steps come from clicks, ticks, typing and page changes. Typing steps name the field, never the value.
+- Steps come from clicks, ticks, typing and page changes. Typing steps name the field, never the value. Pressing a character key shows as "Pressed a key"; named keys like Enter stay visible.
 - URLs keep their path and query keys. Query values become `…`, so `/reset?token=abc` is saved as `/reset?token=…`.
 - `attempts` appears when Pest retried an action. `failed` marks a step that never worked.
 - Problem kinds are `console` (console errors), `error` (uncaught exceptions), `http` (responses of 400 or above) and `network` (requests that failed). Repeats are counted, not listed again.

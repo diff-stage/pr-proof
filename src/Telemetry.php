@@ -100,7 +100,7 @@ final class Telemetry
             'check' => "Ticked {$target}",
             'uncheck' => "Unticked {$target}",
             'hover' => "Hovered over {$target}",
-            'press' => 'Pressed '.($params['key'] ?? 'a key').($target === '' ? '' : " in {$target}"),
+            'press' => 'Pressed '.self::keyName((string) ($params['key'] ?? '')).($target === '' ? '' : " in {$target}"),
             'selectOption' => "Chose an option in {$target}",
             'setInputFiles' => "Attached a file to {$target}",
             default => self::typed($target, (string) ($params['value'] ?? $params['text'] ?? '')),
@@ -242,6 +242,14 @@ final class Telemetry
         return $method.'|'.($params['selector'] ?? '').'|'.($params['value'] ?? $params['key'] ?? '');
     }
 
+    /**
+     * Named keys like Enter or Control+A, but never a typed character.
+     */
+    private static function keyName(string $key): string
+    {
+        return $key === '' || mb_strlen((string) preg_replace('/^Shift\+/', '', $key)) === 1 ? 'a key' : $key;
+    }
+
     private static function typed(string $target, string $value): string
     {
         return $value === '' ? "Cleared {$target}" : "Typed into {$target}";
@@ -264,7 +272,7 @@ final class Telemetry
             return $path;
         }
 
-        $keys = array_filter(array_map(fn (string $pair): string => explode('=', $pair, 2)[0], explode('&', $parts['query'])));
+        $keys = array_filter(array_map(fn (string $pair): string => explode('=', $pair, 2)[0], explode('&', $parts['query'])), fn (string $key): bool => $key !== '');
 
         return $path.'?'.implode('&', array_map(fn (string $key): string => "{$key}=…", $keys));
     }
