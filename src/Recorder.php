@@ -20,6 +20,11 @@ final class Recorder
     private static int $pause = 700;
 
     /**
+     * @var array<string, string>
+     */
+    private static array $titles = [];
+
+    /**
      * @param  array<int, string>|null  $only
      */
     public static function enable(string $directory, ?array $only, int $pause): void
@@ -60,9 +65,24 @@ final class Recorder
         }
 
         $class = $test::getPrintableTestCaseName();
-        $name = self::slug(substr($class, (int) strrpos('\\'.$class, '\\')).' '.$test->getPrintableTestCaseMethodName());
+        $title = substr($class, (int) strrpos('\\'.$class, '\\')).' › '.$test->getPrintableTestCaseMethodName();
+        $name = self::slug($title);
+
+        self::$titles["{$name}.webm"] = $title;
 
         return self::$directory."/{$name}.webm";
+    }
+
+    /**
+     * Writes titles.json so tools can show each video's readable test name.
+     */
+    public static function saved(string $path): void
+    {
+        $titles = array_intersect_key(self::$titles, [basename($path) => true]);
+        $file = self::$directory.'/titles.json';
+        $existing = is_file($file) ? (array) json_decode((string) file_get_contents($file), true) : [];
+
+        file_put_contents($file, json_encode([...$existing, ...$titles], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
     public static function pause(): int

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pest\Browser\Playwright;
 
+use PrProof\Recorder;
 use Exception;
 use PrProof\Telemetry;
 
@@ -135,6 +136,8 @@ final class Context
             $path = $index === 0 ? $this->videoPath : preg_replace('/\.webm$/', '-'.($index + 1).'.webm', $this->videoPath);
 
             iterator_to_array(Client::instance()->execute($artifact, 'saveAs', ['path' => $path]));
+
+            Recorder::saved($this->videoPath);
         }
     }
 
