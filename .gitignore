@@ -1,2 +1,8 @@
 vendor/
 composer.lock
+
+node_modules/
+tests/recording/videos/
+tests/recording/Traces/
+tests/recording/Screenshots/
+tests/recording/server.log

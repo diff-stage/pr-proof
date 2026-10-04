@@ -10,6 +10,7 @@ use Pest\Browser\Enums\Device;
 use Pest\Browser\Playwright\InitScript;
 use Pest\Browser\Playwright\Playwright;
 use Pest\Browser\Support\ComputeUrl;
+use PrProof\Overrides;
 use PrProof\Recorder;
 use PrProof\Telemetry;
 
@@ -200,6 +201,10 @@ final class PendingAwaitablePage
             $context->recordTo($video)->subscribeToProblems();
             $context->addInitScript(Recorder::cursorOverlay());
             unset($options['recordVideo']);
+        }
+
+        if (Overrides::supportsTracing() && Playwright::shouldTrace()) {
+            $context->tracing()?->start(str_replace('__pest_evaluable_', '', test()->name()));
         }
 
         $url = ComputeUrl::from($this->url);

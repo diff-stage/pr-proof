@@ -13,7 +13,12 @@ use RuntimeException;
  */
 final class Overrides
 {
-    public const SUPPORTED_BROWSER_PLUGIN = 'v4.3.1';
+    public const SUPPORTED_BROWSER_PLUGINS = ['v4.3.1', 'v5.1.2'];
+
+    public static function supportsTracing(): bool
+    {
+        return InstalledVersions::getPrettyVersion('pestphp/pest-plugin-browser') === 'v5.1.2';
+    }
 
     private const CLASSES = [
         'Pest\Browser\Api\PendingAwaitablePage' => 'Api/PendingAwaitablePage.php',
@@ -38,8 +43,8 @@ final class Overrides
     {
         $installed = InstalledVersions::getPrettyVersion('pestphp/pest-plugin-browser');
 
-        if ($installed !== self::SUPPORTED_BROWSER_PLUGIN) {
-            throw new RuntimeException('pr-proof supports pestphp/pest-plugin-browser '.self::SUPPORTED_BROWSER_PLUGIN.", but {$installed} is installed.");
+        if (! in_array($installed, self::SUPPORTED_BROWSER_PLUGINS, true)) {
+            throw new RuntimeException('pr-proof supports pestphp/pest-plugin-browser '.implode(' or ', self::SUPPORTED_BROWSER_PLUGINS).", but {$installed} is installed.");
         }
 
         spl_autoload_register(static function (string $class): void {

@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace Pest\Browser\Playwright;
 
-use PrProof\Recorder;
-use PrProof\Telemetry;
 use Amp\Websocket\Client\WebsocketConnection;
 use Generator;
 use Pest\Browser\Exceptions\PlaywrightOutdatedException;
 use PHPUnit\Framework\ExpectationFailedException;
+use PrProof\Overrides;
+use PrProof\Recorder;
+use PrProof\Telemetry;
 
 use function Amp\Websocket\Client\connect;
 
@@ -35,13 +36,16 @@ final class Client
      */
     private int $timeout = 5_000;
 
+    /** @var array<string, array<int, array{file: string, line: int, function: string}>> */
+    private array $stacks = [];
+
     /**
      * Returns the current client instance.
      */
     public static function instance(): self
     {
         if (! self::$instance instanceof self) {
-            self::$instance = new self();
+            self::$instance = new self;
         }
 
         return self::$instance;
@@ -80,12 +84,19 @@ final class Client
 
         $requestId = uniqid();
 
+        if (Overrides::supportsTracing() && Tracing::isRecording()) {
+            $this->recordStack($requestId);
+        }
+
+        $timeout = is_numeric($params['timeout'] ?? null) ? (int) $params['timeout'] : $this->timeout;
+
         $requestJson = (string) json_encode([
             'id' => $requestId,
             'guid' => $guid,
             'method' => $method,
-            'params' => ['timeout' => $this->timeout, ...$params],
-            'metadata' => $meta,
+            'params' => ['timeout' => $timeout, ...$params],
+            // Playwright 1.62+ reads action timeouts from metadata.
+            'metadata' => ['timeout' => $timeout, ...$meta],
         ]);
 
         $retry = Telemetry::isRetry($method, $params);
@@ -111,7 +122,7 @@ final class Client
                 $message = $response['error']['error']['message'];
 
                 if (str_contains($message, 'Playwright was just installed or updated')) {
-                    throw new PlaywrightOutdatedException();
+                    throw new PlaywrightOutdatedException;
                 }
 
                 Telemetry::actionFailed();
@@ -144,6 +155,54 @@ final class Client
     public function timeout(): int
     {
         return $this->timeout;
+    }
+
+    /**
+     * Returns the PHP call stacks of the requests made while tracing.
+     *
+     * @return array<string, array<int, array{file: string, line: int, function: string}>>
+     */
+    public function stacks(): array
+    {
+        return $this->stacks;
+    }
+
+    /**
+     * Forgets the PHP call stacks of the requests made while tracing.
+     */
+    public function flushStacks(): void
+    {
+        $this->stacks = [];
+    }
+
+    /**
+     * Records the PHP call stack of the given request, so the trace viewer can show the test's source.
+     */
+    private function recordStack(string $requestId): void
+    {
+        $src = dirname(__DIR__);
+        $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+        $frames = [];
+
+        foreach ($backtrace as $index => $trace) {
+            if (! isset($trace['file'], $trace['line'])) {
+                continue;
+            }
+
+            if (str_starts_with($trace['file'], $src) || str_contains($trace['file'], DIRECTORY_SEPARATOR.'vendor'.DIRECTORY_SEPARATOR)) {
+                continue;
+            }
+
+            $frames[] = [
+                'file' => $trace['file'],
+                'line' => $trace['line'],
+                'function' => $backtrace[$index + 1]['function'] ?? '',
+            ];
+        }
+
+        if ($frames !== []) {
+            $this->stacks[$requestId] = $frames;
+        }
     }
 
     /**
