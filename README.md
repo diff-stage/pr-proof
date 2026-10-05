@@ -10,8 +10,10 @@ The Diff Stage recorder isn't on Packagist yet, so add its GitHub repository bef
 
 ```bash
 composer config repositories.diff-stage vcs https://github.com/diff-stage/recorder
-composer require --dev diff-stage/recorder:^0.2
+composer require --dev diff-stage/recorder:^0.2 -W
 ```
+
+`-W` lets Composer change PHPUnit to a version Pest supports. A fresh Laravel app needs it.
 
 Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. The recorder replaces three internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
 
