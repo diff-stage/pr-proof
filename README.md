@@ -24,10 +24,18 @@ Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 req
 | Option | Default | What it does |
 |---|---|---|
 | `--record-videos[=DIR]` | `tests/Browser/Videos` | Turns recording on and sets the output folder |
-| `--record-videos-only=A.php,B.php` | every test | Records only tests from these files |
+| `--record-videos-only=A.php,B.php` | every test | Records only tests from these files; does not filter execution |
 | `--record-videos-pause=MS` | `700` | Pause before each action |
 
 Each test is saved as its own `.webm`, named after the test. Without `--record-videos`, Pest runs exactly as before.
+
+Pass file paths to Pest to limit execution as well as recording:
+
+```bash
+./vendor/bin/pest tests/Browser/BookingTest.php --record-videos --record-videos-only=tests/Browser/BookingTest.php
+```
+
+All browser tests in a selected file can produce videos. Run your regression suite separately without `--record-videos`.
 
 Next to each video, pr-proof writes a `.json` file with what happened during the test:
 
@@ -88,7 +96,7 @@ jobs:
           persist-credentials: false
 
       - id: select
-        uses: diff-stage/pr-proof/select@v0.1.0
+        uses: diff-stage/pr-proof/select@SELECT_COMMIT
 
       # ...install dependencies, start your app and install Playwright here...
 
@@ -96,7 +104,9 @@ jobs:
         env:
           TESTS: ${{ steps.select.outputs.tests }}
         run: |
-          ./vendor/bin/pest --record-videos --record-videos-only="$TESTS"
+          rm -rf tests/Browser/Videos
+          IFS=, read -ra tests <<< "$TESTS"
+          ./vendor/bin/pest "${tests[@]}" --record-videos --record-videos-only="$TESTS"
           git rev-parse HEAD > tests/Browser/Videos/sha.txt
 
       - if: steps.select.outputs.tests != ''
@@ -131,15 +141,21 @@ The two jobs keep PR code away from publishing rights:
 - The publisher refuses to upload if `sha.txt` names a different commit from the PR head.
 - Fork PRs still record, and their videos stay as workflow artifacts. They can't publish through the App. Never use `pull_request_target` to run PR code.
 
-The examples pin the `v0.1.0` tag. Pin a full commit SHA instead if your workflows require immutable action references.
+Replace `SELECT_COMMIT` with a reviewed full commit SHA containing explicit-only selection. The `v0.1.0` selector still adds changed files automatically. The recorder and publisher examples use `v0.1.0`; you can pin their full commit SHAs too.
+
+Keep your existing regression jobs independent of this workflow. Empty evidence selection must not skip regression tests or turn them into reviewer videos.
 
 For self-hosted services or projects without an App connection, the existing `url` and `api-token` inputs still work. An explicit project token takes precedence over GitHub identity.
 
-`select` records the browser test files the PR changes. To record others, add a line to the PR description:
+`select` returns only browser test files explicitly requested in the PR description. Add one line with the smallest journeys that prove the diff:
 
 ```
 Browser videos: tests/Browser/CheckoutTest.php, tests/Browser/BookingTest.php
 ```
+
+Changed browser test files are not added automatically. Check what each file demonstrates before selecting it, including unchanged tests that reach the changed behaviour. Paths must match the action's `pattern` regex, which defaults to `^tests/Browser/.+Test\.php$`. Matching paths are deduplicated; this is a file list, not a glob or individual test filter.
+
+If no journey meaningfully demonstrates the diff, leave `Browser videos:` empty or omit it. The selector outputs an empty `tests` value and logs that recording is skipped. The workflow above then skips recording and publication. List omitted journeys and their reasons in the PR description. Never substitute an unrelated smoke journey. A previous video comment may remain, so check its SHA before treating it as current evidence.
 
 `publish` uploads each video to the pr-proof service and keeps one comment on the PR up to date. The comment links to a page where every video plays with normal controls. It shows a still from the first three videos when the service says the still is public. Projects with protected private evidence get links only. PR runs are kept for 30 days. Current approved videos and baselines referenced by retained PR runs survive pruning.
 
@@ -159,9 +175,11 @@ The list renders as plain Markdown, so reviewers can read it in the description 
 
 ## Prepare evidence with an agent
 
-`skills/pr-proof-evidence` is an agent skill for Claude Code, Codex and other tools that read `SKILL.md` skills. While preparing a PR, the agent reads the diff and your browser tests, picks the smallest journeys that show the change, adds tests where none exist, records them at the current commit and writes the `Browser videos:` and `Browser review:` lines. It lists what it couldn't show instead of claiming full coverage.
+`skills/pr-proof-evidence` is an agent skill for Claude Code, Codex and other tools that read `SKILL.md` skills. While preparing a PR, the agent reads the diff and your browser tests, picks the smallest journeys that show the change, adds tests where none exist, records them at the current commit and writes the `Browser videos:` and `Browser review:` lines. It lists omitted journeys and their reasons. It never blindly selects all changed browser tests, and leaves selection empty when none prove the diff.
 
-The skill is one Markdown file. Read it before installing. Copy it from your installed package into your project:
+The skill is one Markdown file. Read it before installing. The `v0.1.0` package contains the previous skill. Until a package release includes these rules, use `skills/pr-proof-evidence` from the same reviewed commit as `SELECT_COMMIT`.
+
+When your installed package includes the updated skill, copy it into your project:
 
 ```bash
 # Claude Code
