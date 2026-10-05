@@ -23,14 +23,16 @@ ffmpeg -v error -y -ss "$start" -to "$end" -i "$input" \
     -vf "tpad=stop_mode=clone:stop_duration=1,format=yuv420p" \
     -r 25 -an -c:v libx264 -crf 28 -movflags +faststart "$output"
 
-# Shift step and problem times in the matching JSON so they line up with the trimmed video.
+# Shift telemetry times in the matching JSON so they line up with the trimmed video.
 if [[ -f "${input%.webm}.json" ]]; then
     python3 - "${input%.webm}.json" "${output}.json" "$start" <<'PY'
 import json, sys
 source, target, offset = sys.argv[1], sys.argv[2], float(sys.argv[3])
 data = json.load(open(source))
-for entry in data.get("steps", []) + data.get("problems", []):
+for entry in data.get("steps", []) + data.get("problems", []) + data.get("assertions", []):
     entry["at"] = round(max(0.0, entry["at"] - offset), 2)
+    if "finished_at" in entry:
+        entry["finished_at"] = round(max(0.0, entry["finished_at"] - offset), 2)
 json.dump(data, open(target, "w"), indent=2, ensure_ascii=False)
 PY
 fi
