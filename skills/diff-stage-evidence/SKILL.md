@@ -22,7 +22,7 @@ This skill needs the Diff Stage recorder installed (`vendor/bin/diff-stage-compr
 
 - Add a test when no existing one reaches the changed screen or state. Follow the project's browser test conventions, factories and fixtures.
 - Assert the end state on screen, such as the confirmation text, so the video ends on proof instead of a redirect.
-- Keep one journey per test, and keep it short. The recorder pauses before every action.
+- Keep one journey per test, and keep it short. The recorder pauses before actions, and video processing adds reading time after captured checks. Never add fixed waits to tests for presentation. Use readiness assertions for asynchronous behavior.
 - Use fake data. Videos show whatever is typed and rendered, and Diff Stage doesn't redact the picture.
 
 ## 3. Record at the current commit

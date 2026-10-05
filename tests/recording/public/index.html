@@ -4,7 +4,9 @@
 <body>
 <h1>Recorder compatibility</h1>
 <label>Message <input name="message"></label>
-<button onclick="document.querySelector('#result').textContent = document.querySelector('input').value">Save message</button>
+<label><input name="terms" type="checkbox"> Accept terms</label>
+<button onclick="document.querySelector('#result').textContent = document.querySelector('input').value; setTimeout(() => document.querySelector('#saved').textContent = 'Message saved', 900)">Save message</button>
 <p id="result">No message saved</p>
+<p id="saved"></p>
 </body>
 </html>

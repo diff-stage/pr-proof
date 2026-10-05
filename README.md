@@ -2,7 +2,7 @@
 
 Readable videos of your Pest browser tests, posted on the pull request.
 
-Reviewers see each changed flow working without checking out the branch. The recorder pauses before every click and keystroke, trims blank frames and holds the final screen, so a two-second test becomes a video someone can follow.
+Reviewers see each changed flow working without checking out the branch. The recorder pauses before every click and keystroke, trims blank frames and adds reading time after recorded checks, so a two-second test becomes a video someone can follow.
 
 ## Install
 
@@ -15,7 +15,7 @@ composer require --dev diff-stage/recorder:^0.2 -W
 
 `-W` lets Composer change PHPUnit to a version Pest supports. A fresh Laravel app needs it.
 
-Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. The recorder replaces three internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
+Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. The recorder replaces four internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
 
 ## Record locally
 
@@ -61,7 +61,7 @@ Next to each video, the recorder writes a `.json` file with what happened during
 - `attempts` appears when Pest retried an action. `failed` marks a step that never worked.
 - Problem kinds are `console` (console errors), `error` (uncaught exceptions), `http` (responses of 400 or above) and `network` (requests that failed). Repeats are counted, not listed again.
 
-`vendor/bin/diff-stage-compress input.webm output.mp4` turns a recording into a trimmed MP4. If `input.json` exists, it also writes `output.mp4.json` with the times shifted to match the trimmed video.
+`vendor/bin/diff-stage-compress input.webm output.mp4` turns a recording into a trimmed MP4. It adds reading time after captured assertion outcomes, aiming for two seconds before the next caption change, and holds the final screen for two seconds. Checks that complete within the same captured frame stay together. These holds are added after the test runs. Do not add `wait()` calls to tests for video readability. If `input.json` exists, it also writes `output.mp4.json` with the times shifted to match trimming and added reading time.
 
 ## Compare approved flows
 
@@ -222,7 +222,9 @@ jobs:
 
 `mode` defaults to `pull_request`. Baseline mode accepts only `push` or `workflow_dispatch` on the repository's default branch and never posts a PR comment. The workflow must check the recording step's outcome, including when it uses `continue-on-error`. Clear the video directory before recording on persistent runners to avoid uploading files from an earlier run.
 
-The publisher creates a run with its kind, commit SHA and branch. Baselines also send `source_order` from `github.run_number`. Each upload includes the filename-stem `flow_key`, MP4, JPEG poster and compressed JSON telemetry. Pull request uploads named in `Browser review:` also send `review_reason` and `review_order`. Recordings without telemetry send empty steps and problems for compatibility. It calls `/api/runs/{id}/complete` with `expected_videos` only after every upload succeeds. Failed or partial baseline runs never become approved. Completed runs are immutable.
+The publisher creates a run with its kind, commit SHA and branch. Baselines also send `source_order` from `github.run_number`. Supported browser assertions also record one check with its start time, finish time and pass/fail outcome. The player can show checking, verified and failed captions without exposing expected field values. Text checks redact values entered earlier in the recording. Custom script assertions are not captioned.
+
+Each upload includes the filename-stem `flow_key`, MP4, JPEG poster and compressed JSON telemetry. Pull request uploads named in `Browser review:` also send `review_reason` and `review_order`. Recordings without telemetry send empty steps and problems for compatibility. It calls `/api/runs/{id}/complete` with `expected_videos` only after every upload succeeds. Failed or partial baseline runs never become approved. Completed runs are immutable.
 
 ## Licence
 
