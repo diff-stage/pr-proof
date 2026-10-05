@@ -2,7 +2,7 @@
 
 Readable videos of your Pest browser tests, posted on the pull request.
 
-Reviewers see each changed flow working without checking out the branch. The recorder pauses before every click and keystroke, trims blank frames and holds the final screen, so a two-second test becomes a video someone can follow.
+Reviewers see each changed flow working without checking out the branch. The recorder pauses before every click and keystroke, trims blank frames and adds reading time after recorded checks, so a two-second test becomes a video someone can follow.
 
 ## Install
 
@@ -61,7 +61,7 @@ Next to each video, the recorder writes a `.json` file with what happened during
 - `attempts` appears when Pest retried an action. `failed` marks a step that never worked.
 - Problem kinds are `console` (console errors), `error` (uncaught exceptions), `http` (responses of 400 or above) and `network` (requests that failed). Repeats are counted, not listed again.
 
-`vendor/bin/diff-stage-compress input.webm output.mp4` turns a recording into a trimmed MP4. If `input.json` exists, it also writes `output.mp4.json` with the times shifted to match the trimmed video.
+`vendor/bin/diff-stage-compress input.webm output.mp4` turns a recording into a trimmed MP4. It adds reading time after captured assertion outcomes, aiming for two seconds before the next caption change, and holds the final screen for two seconds. Checks that complete within the same captured frame stay together. These holds are added after the test runs. Do not add `wait()` calls to tests for video readability. If `input.json` exists, it also writes `output.mp4.json` with the times shifted to match trimming and added reading time.
 
 ## Compare approved flows
 
