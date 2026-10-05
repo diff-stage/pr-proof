@@ -37,13 +37,13 @@ mapfile -t names < <(jq -rn --argjson review "$review" '($review | map(.flow_key
   | ($keys - ($keys - $ARGS.positional)) + ($ARGS.positional - $keys) | .[]' --args "${names[@]}")
 
 command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; }
-if [[ -z "${PR_PROOF_TOKEN:-}" && ( -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ) ]]; then
-  echo 'Allow id-token: write on the publishing job and connect this repository to the Diff Stage GitHub App. No PR_PROOF_TOKEN secret is needed.' >&2
+if [[ -z "${DIFF_STAGE_TOKEN:-}" && ( -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ) ]]; then
+  echo 'Allow id-token: write on the publishing job and connect this repository to the Diff Stage GitHub App. No api-token is needed.' >&2
   exit 1
 fi
 
 api() {
-  local credential="${PR_PROOF_TOKEN:-}"
+  local credential="${DIFF_STAGE_TOKEN:-}"
   if [[ -z "$credential" ]]; then
     credential=$(curl -sSf --get --data-urlencode 'audience=diff-stage' \
       -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" | \
@@ -61,7 +61,7 @@ api() {
   printf '%s' "$response"
 }
 
-run=$(api -X POST "${PR_PROOF_URL%/}/api/runs" \
+run=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs" \
   -H "Content-Type: application/json" --data "$payload")
 run_id=$(jq -r .id <<< "$run")
 run_url=$(jq -r .url <<< "$run")
@@ -89,7 +89,7 @@ for name in "${names[@]}"; do
     fields=(--form-string "review_reason=$(jq -r .reason <<< "$entry")" --form-string "review_order=$(jq -r .order <<< "$entry")")
   fi
 
-  uploaded=$(api -X POST "${PR_PROOF_URL%/}/api/runs/$run_id/videos" \
+  uploaded=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/videos" \
     --form-string "name=$title" --form-string "flow_key=$name" "${fields[@]}" \
     -F "telemetry=@$telemetry;type=application/json" -F "video=@$mp4;type=video/mp4" -F "poster=@$poster;type=image/jpeg")
   video_url=$(jq -r '.url | @html' <<< "$uploaded")
@@ -106,7 +106,7 @@ for name in "${names[@]}"; do
   links+=$(printf '<li><a href="%s">%s</a></li>' "$video_url" "$escaped_title")
 done
 
-api -X POST "${PR_PROOF_URL%/}/api/runs/$run_id/complete" \
+api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/complete" \
   -H 'Content-Type: application/json' --data "{\"expected_videos\":${#videos[@]}}" >/dev/null
 
 if [[ "$MODE" == baseline ]]; then
@@ -117,10 +117,10 @@ fi
 body=$(mktemp)
 trap 'rm -f "$body"' EXIT
 {
-  echo '<!-- pr-proof -->'
+  echo '<!-- diff-stage -->'
   echo "### Browser test videos for ${HEAD_SHA::7}"
   echo
-  echo "**[Watch all ${#videos[@]} on pr-proof]($run_url)**"
+  echo "**[Watch all ${#videos[@]} on Diff Stage]($run_url)**"
   echo
   if [[ -n "$previews" ]]; then
     echo "<table><tr>$previews</tr></table>"
@@ -141,7 +141,7 @@ trap 'rm -f "$body"' EXIT
 } > "$body"
 
 existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-  --jq '.[] | select(.body | startswith("<!-- pr-proof -->")) | .id' | tail -n 1)
+  --jq '.[] | select(.body | startswith("<!-- diff-stage -->") or startswith("<!-- pr-proof -->")) | .id' | tail -n 1)
 if [[ -n "$existing" ]]; then
   gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@"$body" >/dev/null
 else

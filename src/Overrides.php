@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PrProof;
+namespace DiffStage\Recorder;
 
 use Composer\InstalledVersions;
 use RuntimeException;
@@ -44,7 +44,7 @@ final class Overrides
         $installed = InstalledVersions::getPrettyVersion('pestphp/pest-plugin-browser');
 
         if (! in_array($installed, self::SUPPORTED_BROWSER_PLUGINS, true)) {
-            throw new RuntimeException('pr-proof supports pestphp/pest-plugin-browser '.implode(' or ', self::SUPPORTED_BROWSER_PLUGINS).", but {$installed} is installed.");
+            throw new RuntimeException('The Diff Stage recorder supports pestphp/pest-plugin-browser '.implode(' or ', self::SUPPORTED_BROWSER_PLUGINS).", but {$installed} is installed.");
         }
 
         spl_autoload_register(static function (string $class): void {

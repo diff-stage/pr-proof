@@ -10,9 +10,9 @@ use Pest\Browser\Enums\Device;
 use Pest\Browser\Playwright\InitScript;
 use Pest\Browser\Playwright\Playwright;
 use Pest\Browser\Support\ComputeUrl;
-use PrProof\Overrides;
-use PrProof\Recorder;
-use PrProof\Telemetry;
+use DiffStage\Recorder\Overrides;
+use DiffStage\Recorder\Recorder;
+use DiffStage\Recorder\Telemetry;
 
 /**
  * @mixin Webpage|AwaitableWebpage

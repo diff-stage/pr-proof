@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PrProof;
+namespace DiffStage\Recorder;
 
 /**
  * Turns a Playwright selector into the name a person would use for the element.

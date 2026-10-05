@@ -1,5 +1,5 @@
 {
-    "name": "wardy484/pr-proof",
+    "name": "diff-stage/recorder",
     "description": "Readable videos of Pest browser tests, posted on your pull requests.",
     "type": "library",
     "license": "MIT",
@@ -10,19 +10,19 @@
     },
     "autoload": {
         "psr-4": {
-            "PrProof\\": "src/"
+            "DiffStage\\Recorder\\": "src/"
         },
         "files": [
             "src/bootstrap.php"
         ]
     },
     "bin": [
-        "bin/pr-proof-compress"
+        "bin/diff-stage-compress"
     ],
     "extra": {
         "pest": {
             "plugins": [
-                "PrProof\\Plugin"
+                "DiffStage\\Recorder\\Plugin"
             ]
         }
     },

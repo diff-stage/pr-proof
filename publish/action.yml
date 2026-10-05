@@ -1,5 +1,5 @@
-name: pr-proof publish
-description: Upload recorded browser test videos to pr-proof and post them on the pull request.
+name: Diff Stage publish
+description: Upload recorded browser test videos to Diff Stage and post them on the pull request.
 
 inputs:
   mode:
@@ -11,7 +11,7 @@ inputs:
   api-token:
     description: Optional project token for repositories without a Diff Stage GitHub App connection. Otherwise uses GitHub Actions identity.
   url:
-    description: pr-proof service URL.
+    description: Diff Stage service URL.
     default: https://pr-proof-production-it8ufh.laravel.cloud
   token:
     description: Token that can comment on the pull request.
@@ -30,12 +30,12 @@ runs:
         RECORDING_ID: ${{ github.run_id }}:${{ github.run_attempt }}
         RECORDING_SHA: ${{ github.sha }}
         GH_TOKEN: ${{ inputs.token }}
-        PR_PROOF_TOKEN: ${{ inputs.api-token }}
-        PR_PROOF_URL: ${{ inputs.url }}
+        DIFF_STAGE_TOKEN: ${{ inputs.api-token }}
+        DIFF_STAGE_URL: ${{ inputs.url }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_BODY: ${{ github.event.pull_request.body }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         HEAD_REF: ${{ github.event.pull_request.head.ref }}
         VIDEOS: ${{ inputs.videos }}
-        COMPRESS: ${{ github.action_path }}/../bin/pr-proof-compress
+        COMPRESS: ${{ github.action_path }}/../bin/diff-stage-compress
       run: bash "${{ github.action_path }}/publish.sh"

@@ -1,7 +1,7 @@
 {
-    "name": "pr-proof/recording-test",
+    "name": "diff-stage/recording-test",
     "require-dev": {
-        "wardy484/pr-proof": "@dev"
+        "diff-stage/recorder": "@dev"
     },
     "repositories": [
         {

@@ -2,4 +2,4 @@
 
 declare(strict_types=1);
 
-PrProof\Overrides::registerWhenRecording();
+DiffStage\Recorder\Overrides::registerWhenRecording();

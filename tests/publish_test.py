@@ -91,7 +91,11 @@ class PublishTest(unittest.TestCase):
         for name in ('checkout', 'booking'):
             (self.path / f'{name}.webm').write_bytes(b'video')
         self.stub('ffmpeg', 'touch "${@: -1}"')
+        (self.path / 'comments.json').write_text('[]')
         self.stub('gh', '''echo "$*" >> "$GH_LOG"
+if [[ " $* " == *" --paginate "* ]]; then
+  jq -r "${@: -1}" "$COMMENTS_FILE"
+fi
 for arg in "$@"; do
   if [[ "$arg" == body=@* ]]; then
     cp "${arg#body=@}" "$COMMENT_FILE"
@@ -106,10 +110,10 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
                         PR_NUMBER='42', HEAD_SHA='a' * 40, HEAD_REF='feature',
                         EVENT_NAME='push', DEFAULT_BRANCH='main', REF_NAME='main',
                         RUN_NUMBER='23', RECORDING_ID='100:1', RECORDING_SHA='b' * 40, VIDEOS=str(self.path),
-                        COMPRESS=str(self.path / 'compress'), PR_PROOF_TOKEN='test',
-                        PR_PROOF_URL=f'http://127.0.0.1:{self.server.server_port}',
+                        COMPRESS=str(self.path / 'compress'), DIFF_STAGE_TOKEN='test',
+                        DIFF_STAGE_URL=f'http://127.0.0.1:{self.server.server_port}',
                         GITHUB_REPOSITORY='owner/repo', GH_LOG=str(self.path / 'gh.log'),
-                        COMMENT_FILE=str(self.path / 'comment.md'))
+                        COMMENT_FILE=str(self.path / 'comment.md'), COMMENTS_FILE=str(self.path / 'comments.json'))
 
     def stub(self, name, body):
         file = self.path / name
@@ -129,7 +133,7 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         return parser
 
     def identity_env(self):
-        return dict(PR_PROOF_TOKEN='',
+        return dict(DIFF_STAGE_TOKEN='',
                     ACTIONS_ID_TOKEN_REQUEST_URL=f'http://127.0.0.1:{self.server.server_port}/identity?job=123',
                     ACTIONS_ID_TOKEN_REQUEST_TOKEN='request-token')
 
@@ -152,7 +156,7 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         self.assertFalse((self.path / 'gh.log').exists())
 
     def test_explicit_project_token_takes_precedence(self):
-        result = self.run_publish(**(self.identity_env() | {'PR_PROOF_TOKEN': 'project-token'}))
+        result = self.run_publish(**(self.identity_env() | {'DIFF_STAGE_TOKEN': 'project-token'}))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.identity_requests, [])
         self.assertEqual(self.credentials, ['Bearer project-token'] * 4)
@@ -166,7 +170,7 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         self.assertFalse((self.path / 'gh.log').exists())
 
     def test_missing_identity_permission_fails_before_upload(self):
-        result = self.run_publish(PR_PROOF_TOKEN='', ACTIONS_ID_TOKEN_REQUEST_URL='', ACTIONS_ID_TOKEN_REQUEST_TOKEN='')
+        result = self.run_publish(DIFF_STAGE_TOKEN='', ACTIONS_ID_TOKEN_REQUEST_URL='', ACTIONS_ID_TOKEN_REQUEST_TOKEN='')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('id-token: write', result.stderr)
         self.assertEqual(self.requests, [])
@@ -193,6 +197,20 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         self.assertEqual(json.loads(self.requests[-1][1]), {'expected_videos': 2})
         self.assertIn('pr comment 42', (self.path / 'gh.log').read_text())
 
+    def test_updates_the_existing_comment_under_either_marker(self):
+        for marker in ('<!-- diff-stage -->', '<!-- pr-proof -->'):
+            with self.subTest(marker=marker):
+                (self.path / 'comments.json').write_text(json.dumps([
+                    {'id': 7, 'body': f'{marker}\nold videos'},
+                    {'id': 8, 'body': 'Looks good'},
+                ]))
+                (self.path / 'gh.log').unlink(missing_ok=True)
+                result = self.run_publish()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                log = (self.path / 'gh.log').read_text()
+                self.assertIn('api -X PATCH repos/owner/repo/issues/comments/7', log)
+                self.assertNotIn('pr comment', log)
+
     def test_comment_limits_previews_and_preserves_titles_as_text(self):
         titles = {
             f'{name}.webm': f'{name} with dataset "mobile" & <script> [example] | \'quoted\''
@@ -204,8 +222,8 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         result = self.run_publish()
         self.assertEqual(result.returncode, 0, result.stderr)
         body = (self.path / 'comment.md').read_text()
-        self.assertTrue(body.startswith('<!-- pr-proof -->'))
-        self.assertIn('Watch all 5 on pr-proof', body)
+        self.assertTrue(body.startswith('<!-- diff-stage -->'))
+        self.assertIn('Watch all 5 on Diff Stage', body)
         self.assertIn('<summary>All browser tests (5)</summary>', body)
         comment = self.comment()
         self.assertEqual(len(comment.images), 3)

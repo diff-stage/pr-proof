@@ -11,7 +11,7 @@ namespace Composer {
 }
 
 namespace {
-    use PrProof\Overrides;
+    use DiffStage\Recorder\Overrides;
 
     require __DIR__.'/../../src/Overrides.php';
     $_SERVER['argv'] = ['pest', '--record-videos'];

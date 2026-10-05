@@ -1,4 +1,4 @@
-# pr-proof
+# Diff Stage recorder
 
 Readable videos of your Pest browser tests, posted on the pull request.
 
@@ -6,14 +6,14 @@ Reviewers see each changed flow working without checking out the branch. The rec
 
 ## Install
 
-pr-proof isn't on Packagist yet, so add its GitHub repository before requiring it:
+The Diff Stage recorder isn't on Packagist yet, so add its GitHub repository before requiring it:
 
 ```bash
-composer config repositories.pr-proof vcs https://github.com/diff-stage/pr-proof
-composer require --dev wardy484/pr-proof:0.1.0
+composer config repositories.diff-stage vcs https://github.com/diff-stage/recorder
+composer require --dev diff-stage/recorder:^0.2
 ```
 
-Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. pr-proof replaces three internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
+Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. The recorder replaces three internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
 
 ## Record locally
 
@@ -37,7 +37,7 @@ Pass file paths to Pest to limit execution as well as recording:
 
 All browser tests in a selected file can produce videos. Run your regression suite separately without `--record-videos`.
 
-Next to each video, pr-proof writes a `.json` file with what happened during the test:
+Next to each video, the recorder writes a `.json` file with what happened during the test:
 
 ```json
 {
@@ -59,7 +59,7 @@ Next to each video, pr-proof writes a `.json` file with what happened during the
 - `attempts` appears when Pest retried an action. `failed` marks a step that never worked.
 - Problem kinds are `console` (console errors), `error` (uncaught exceptions), `http` (responses of 400 or above) and `network` (requests that failed). Repeats are counted, not listed again.
 
-`vendor/bin/pr-proof-compress input.webm output.mp4` turns a recording into a trimmed MP4. If `input.json` exists, it also writes `output.mp4.json` with the times shifted to match the trimmed video.
+`vendor/bin/diff-stage-compress input.webm output.mp4` turns a recording into a trimmed MP4. If `input.json` exists, it also writes `output.mp4.json` with the times shifted to match the trimmed video.
 
 ## Compare approved flows
 
@@ -96,7 +96,7 @@ jobs:
           persist-credentials: false
 
       - id: select
-        uses: diff-stage/pr-proof/select@SELECT_COMMIT
+        uses: diff-stage/recorder/select@v0.2.0
 
       # ...install dependencies, start your app and install Playwright here...
 
@@ -131,7 +131,7 @@ jobs:
           name: browser-videos-${{ github.event.pull_request.head.sha }}
           path: tests/Browser/Videos
 
-      - uses: diff-stage/pr-proof/publish@v0.1.0
+      - uses: diff-stage/recorder/publish@v0.2.0
 ```
 
 The two jobs keep PR code away from publishing rights:
@@ -141,7 +141,7 @@ The two jobs keep PR code away from publishing rights:
 - The publisher refuses to upload if `sha.txt` names a different commit from the PR head.
 - Fork PRs still record, and their videos stay as workflow artifacts. They can't publish through the App. Never use `pull_request_target` to run PR code.
 
-Replace `SELECT_COMMIT` with a reviewed full commit SHA containing explicit-only selection. The `v0.1.0` selector still adds changed files automatically. The recorder and publisher examples use `v0.1.0`; you can pin their full commit SHAs too.
+The examples use `v0.2.0`. You can pin full commit SHAs instead. The `v0.1.0` selector adds changed files automatically, so use `v0.2.0` or later.
 
 Keep your existing regression jobs independent of this workflow. Empty evidence selection must not skip regression tests or turn them into reviewer videos.
 
@@ -157,7 +157,7 @@ Changed browser test files are not added automatically. Check what each file dem
 
 If no journey meaningfully demonstrates the diff, leave `Browser videos:` empty or omit it. The selector outputs an empty `tests` value and logs that recording is skipped. The workflow above then skips recording and publication. List omitted journeys and their reasons in the PR description. Never substitute an unrelated smoke journey. A previous video comment may remain, so check its SHA before treating it as current evidence.
 
-`publish` uploads each video to the pr-proof service and keeps one comment on the PR up to date. The comment links to a page where every video plays with normal controls. It shows a still from the first three videos when the service says the still is public. Projects with protected private evidence get links only. PR runs are kept for 30 days. Current approved videos and baselines referenced by retained PR runs survive pruning.
+`publish` uploads each video to the Diff Stage service and keeps one comment on the PR up to date. The comment links to a page where every video plays with normal controls. It shows a still from the first three videos when the service says the still is public. Projects with protected private evidence get links only. PR runs are kept for 30 days. Current approved videos and baselines referenced by retained PR runs survive pruning.
 
 ## Tell reviewers what to watch
 
@@ -175,23 +175,21 @@ The list renders as plain Markdown, so reviewers can read it in the description 
 
 ## Prepare evidence with an agent
 
-`skills/pr-proof-evidence` is an agent skill for Claude Code, Codex and other tools that read `SKILL.md` skills. While preparing a PR, the agent reads the diff and your browser tests, picks the smallest journeys that show the change, adds tests where none exist, records them at the current commit and writes the `Browser videos:` and `Browser review:` lines. It lists omitted journeys and their reasons. It never blindly selects all changed browser tests, and leaves selection empty when none prove the diff.
+`skills/diff-stage-evidence` is an agent skill for Claude Code, Codex and other tools that read `SKILL.md` skills. While preparing a PR, the agent reads the diff and your browser tests, picks the smallest journeys that show the change, adds tests where none exist, records them at the current commit and writes the `Browser videos:` and `Browser review:` lines. It lists omitted journeys and their reasons. It never blindly selects all changed browser tests, and leaves selection empty when none prove the diff.
 
-The skill is one Markdown file. Read it before installing. The `v0.1.0` package contains the previous skill. Until a package release includes these rules, use `skills/pr-proof-evidence` from the same reviewed commit as `SELECT_COMMIT`.
-
-When your installed package includes the updated skill, copy it into your project:
+The skill is one Markdown file. Read it before installing, then copy it into your project:
 
 ```bash
 # Claude Code
 mkdir -p .claude/skills
-cp -r vendor/wardy484/pr-proof/skills/pr-proof-evidence .claude/skills/
+cp -r vendor/diff-stage/recorder/skills/diff-stage-evidence .claude/skills/
 
 # Codex
 mkdir -p .agents/skills
-cp -r vendor/wardy484/pr-proof/skills/pr-proof-evidence .agents/skills/
+cp -r vendor/diff-stage/recorder/skills/diff-stage-evidence .agents/skills/
 ```
 
-Copy it to `~/.claude/skills` or `~/.agents/skills` to use it across projects. Copy it again after upgrading pr-proof.
+Copy it to `~/.claude/skills` or `~/.agents/skills` to use it across projects. Copy it again after upgrading the recorder.
 
 ## Record approved baselines
 
@@ -215,7 +213,7 @@ jobs:
       - id: record
         run: ./vendor/bin/pest tests/Browser --record-videos
       - if: success() && steps.record.outcome == 'success'
-        uses: diff-stage/pr-proof/publish@v0.1.0
+        uses: diff-stage/recorder/publish@v0.2.0
         with:
           mode: baseline
 ```

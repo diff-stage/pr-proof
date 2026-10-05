@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Pest\Browser\Playwright;
 
 use Exception;
-use PrProof\Recorder;
-use PrProof\Telemetry;
+use DiffStage\Recorder\Recorder;
+use DiffStage\Recorder\Telemetry;
 
 /**
  * @internal

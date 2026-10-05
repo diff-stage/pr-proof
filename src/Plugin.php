@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PrProof;
+namespace DiffStage\Recorder;
 
 use Pest\Contracts\Plugins\HandlesArguments;
 
