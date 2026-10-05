@@ -24,8 +24,20 @@ foreach ($files as $file) {
     if (count($data["steps"]) < 3) throw new RuntimeException("Missing recorded actions");
     if ($data["problems"] !== []) throw new RuntimeException("Unexpected browser problems");
     $text = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if (str_contains($text, "query-secret") || str_contains($text, "Compatibility verified")) throw new RuntimeException("Telemetry kept a typed or query value");
-    if (! str_contains($text, "Opened /?token=…") || ! str_contains($text, "Pressed a key")) throw new RuntimeException("Missing redacted steps");
+    if (str_contains($text, "query-secret") || str_contains($text, "Compatibility verified") || str_contains($text, "Disposable private message")) throw new RuntimeException("Telemetry kept a typed or query value");
+    if (! str_contains($text, "Opened /?token=…")) throw new RuntimeException("Missing redacted steps");
+    $assertions = $data["assertions"];
+    foreach ($assertions as $assertion) {
+        if (! is_bool($assertion["passed"]) || $assertion["finished_at"] < $assertion["at"]) throw new RuntimeException("Invalid assertion outcome");
+    }
+    if (str_contains(basename($file), "successful-delayed")) {
+        if (count($assertions) !== 7) throw new RuntimeException("Assertion retries were duplicated or unsupported checks recorded");
+        if ($assertions[0]["finished_at"] - $assertions[0]["at"] < 0.5) throw new RuntimeException("Delayed assertion did not wait");
+        if (array_column($assertions, "passed") !== [true, true, true, true, true, true, false]) throw new RuntimeException("Incorrect assertion outcomes");
+        if (array_filter($data["steps"], fn ($step) => $step["failed"] ?? false)) throw new RuntimeException("Failed assertion marked an action as failed");
+    } elseif (! str_contains($text, "Pressed a key")) {
+        throw new RuntimeException("Missing redacted key press");
+    }
     if (str_contains($text, "Pressed 7")) throw new RuntimeException("Telemetry kept a pressed character");
 }
 '

@@ -15,7 +15,7 @@ composer require --dev diff-stage/recorder:^0.2 -W
 
 `-W` lets Composer change PHPUnit to a version Pest supports. A fresh Laravel app needs it.
 
-Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. The recorder replaces three internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
+Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. The recorder replaces four internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
 
 ## Record locally
 
@@ -222,7 +222,9 @@ jobs:
 
 `mode` defaults to `pull_request`. Baseline mode accepts only `push` or `workflow_dispatch` on the repository's default branch and never posts a PR comment. The workflow must check the recording step's outcome, including when it uses `continue-on-error`. Clear the video directory before recording on persistent runners to avoid uploading files from an earlier run.
 
-The publisher creates a run with its kind, commit SHA and branch. Baselines also send `source_order` from `github.run_number`. Each upload includes the filename-stem `flow_key`, MP4, JPEG poster and compressed JSON telemetry. Pull request uploads named in `Browser review:` also send `review_reason` and `review_order`. Recordings without telemetry send empty steps and problems for compatibility. It calls `/api/runs/{id}/complete` with `expected_videos` only after every upload succeeds. Failed or partial baseline runs never become approved. Completed runs are immutable.
+The publisher creates a run with its kind, commit SHA and branch. Baselines also send `source_order` from `github.run_number`. Supported browser assertions also record one check with its start time, finish time and pass/fail outcome. The player can show checking, verified and failed captions without exposing expected field values. Text checks redact values entered earlier in the recording. Custom script assertions are not captioned.
+
+Each upload includes the filename-stem `flow_key`, MP4, JPEG poster and compressed JSON telemetry. Pull request uploads named in `Browser review:` also send `review_reason` and `review_order`. Recordings without telemetry send empty steps and problems for compatibility. It calls `/api/runs/{id}/complete` with `expected_videos` only after every upload succeeds. Failed or partial baseline runs never become approved. Completed runs are immutable.
 
 ## Licence
 

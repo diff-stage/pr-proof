@@ -12,6 +12,8 @@ final class Telemetry
 {
     private const ACTIONS = ['click', 'dblclick', 'check', 'uncheck', 'fill', 'type', 'press', 'selectOption', 'hover', 'tap', 'setInputFiles'];
 
+    private const ASSERTIONS = ['assertSee', 'assertDontSee', 'assertSeeIn', 'assertDontSeeIn', 'assertPathIs', 'assertUrlIs', 'assertVisible', 'assertChecked', 'assertNotChecked', 'assertEnabled', 'assertButtonEnabled', 'assertDisabled', 'assertButtonDisabled', 'assertValue', 'assertSelected'];
+
     private static ?float $startedAt = null;
 
     /**
@@ -23,6 +25,14 @@ final class Telemetry
      * @var array<int, array{at: float, kind: string, text: string, count?: int}>
      */
     private static array $problems = [];
+
+    /** @var array<int, array{at: float, text: string, finished_at?: float, passed?: bool}> */
+    private static array $assertions = [];
+
+    /** @var list<string> */
+    private static array $typedValues = [];
+
+    private static int $assertionsRunning = 0;
 
     /**
      * @var array<string, array{method: string, url: string}>
@@ -45,6 +55,9 @@ final class Telemetry
         self::$startedAt = microtime(true);
         self::$steps = [];
         self::$problems = [];
+        self::$assertions = [];
+        self::$typedValues = [];
+        self::$assertionsRunning = 0;
         self::$requests = [];
         self::$mainFrames = [];
         self::$lastUrl = null;
@@ -69,7 +82,56 @@ final class Telemetry
 
     public static function actionFailed(): void
     {
-        self::$lastActionFailed = self::$lastAction !== null;
+        if (self::$assertionsRunning === 0) {
+            self::$lastActionFailed = self::$lastAction !== null;
+        }
+    }
+
+    /** @param array<int, mixed> $arguments */
+    public static function beginAssertion(string $method, array $arguments): ?int
+    {
+        if (! self::active() || ! in_array($method, self::ASSERTIONS, true)) {
+            return null;
+        }
+
+        $target = Selector::describe((string) ($arguments[0] ?? ''));
+        $expectedText = self::assertionText((string) ($arguments[1] ?? $arguments[0] ?? ''));
+        $text = match ($method) {
+            'assertSee' => "Text {$expectedText} is visible",
+            'assertDontSee' => "Text {$expectedText} is not visible",
+            'assertSeeIn' => "Text {$expectedText} is visible in {$target}",
+            'assertDontSeeIn' => "Text {$expectedText} is not visible in {$target}",
+            'assertPathIs' => 'Page path matches '.self::path((string) $arguments[0]),
+            'assertUrlIs' => 'Page URL matches the expected address',
+            'assertVisible' => "{$target} is visible",
+            'assertChecked' => "Checkbox {$target} is checked",
+            'assertNotChecked' => "Checkbox {$target} is not checked",
+            'assertEnabled', 'assertButtonEnabled' => "{$target} is enabled",
+            'assertDisabled', 'assertButtonDisabled' => "{$target} is disabled",
+            'assertValue' => "Value in {$target} matches the expected value",
+            'assertSelected' => "Selection in {$target} matches the expected option",
+            default => null,
+        };
+
+        if ($text === null) {
+            return null;
+        }
+
+        self::$assertions[] = ['at' => self::now(), 'text' => $text];
+        self::$assertionsRunning++;
+
+        return array_key_last(self::$assertions);
+    }
+
+    public static function endAssertion(?int $index, bool $passed): void
+    {
+        if ($index === null) {
+            return;
+        }
+
+        self::$assertions[$index]['finished_at'] = self::now();
+        self::$assertions[$index]['passed'] = $passed;
+        self::$assertionsRunning--;
     }
 
     /**
@@ -79,6 +141,13 @@ final class Telemetry
     {
         if (! self::active() || ! in_array($method, self::ACTIONS, true)) {
             return;
+        }
+
+        if (in_array($method, ['fill', 'type'], true)) {
+            $value = (string) ($params['value'] ?? $params['text'] ?? '');
+            if ($value !== '') {
+                self::$typedValues[] = $value;
+            }
         }
 
         if (self::isRetry($method, $params)) {
@@ -131,7 +200,7 @@ final class Telemetry
     }
 
     /**
-     * @return array{steps: array<int, array{at: float, text: string, attempts?: int, failed?: bool}>, problems: array<int, array{at: float, kind: string, text: string, count?: int}>}
+     * @return array{steps: array<int, array{at: float, text: string, attempts?: int, failed?: bool}>, problems: array<int, array{at: float, kind: string, text: string, count?: int}>, assertions: array<int, array{at: float, text: string, finished_at?: float, passed?: bool}>}
      */
     public static function finish(): array
     {
@@ -139,9 +208,10 @@ final class Telemetry
             self::$steps[array_key_last(self::$steps)]['failed'] = true;
         }
 
-        $result = ['steps' => self::$steps, 'problems' => self::$problems];
+        $result = ['steps' => self::$steps, 'problems' => self::$problems, 'assertions' => self::$assertions];
 
         self::$startedAt = null;
+        self::$typedValues = [];
 
         return $result;
     }
@@ -253,6 +323,20 @@ final class Telemetry
     private static function typed(string $target, string $value): string
     {
         return $value === '' ? "Cleared {$target}" : "Typed into {$target}";
+    }
+
+    private static function assertionText(string $text): string
+    {
+        foreach (self::$typedValues as $value) {
+            if ($text === $value) {
+                return '(entered text)';
+            }
+            if (mb_strlen($value) >= 4) {
+                $text = str_replace($value, '(entered text)', $text);
+            }
+        }
+
+        return '"'.(mb_strlen($text) > 100 ? mb_substr($text, 0, 100).'…' : $text).'"';
     }
 
     /**

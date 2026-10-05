@@ -8,7 +8,7 @@ use Composer\InstalledVersions;
 use RuntimeException;
 
 /**
- * Swaps three Pest Browser classes for copies that can record video.
+ * Swaps four Pest Browser classes for copies that can record video.
  * This runs from Composer's autoloader, before Pest loads any of them.
  */
 final class Overrides
@@ -21,6 +21,7 @@ final class Overrides
     }
 
     private const CLASSES = [
+        'Pest\\Browser\\Api\\AwaitableWebpage' => 'Api/AwaitableWebpage.php',
         'Pest\Browser\Api\PendingAwaitablePage' => 'Api/PendingAwaitablePage.php',
         'Pest\Browser\Playwright\Context' => 'Playwright/Context.php',
         'Pest\Browser\Playwright\Client' => 'Playwright/Client.php',

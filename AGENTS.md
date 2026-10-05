@@ -5,7 +5,7 @@ The Diff Stage recorder records readable videos of Pest browser tests and posts 
 ## How it fits together
 
 - `src/Plugin.php` reads `--record-videos`, `--record-videos-only` and `--record-videos-pause`.
-- `src/bootstrap.php` (Composer `autoload.files`) swaps three Pest Browser classes for the copies in `overrides/` before Pest loads them. They support `pestphp/pest-plugin-browser` v4.3.1 and v5.1.2 exactly. Browser 5 tracing is preserved.
+- `src/bootstrap.php` (Composer `autoload.files`) swaps four Pest Browser classes for the copies in `overrides/` before Pest loads them. They support `pestphp/pest-plugin-browser` v4.3.1 and v5.1.2 exactly. Browser 5 tracing is preserved.
 - `select/action.yml` picks only test files explicitly listed in `Browser videos:` lines in the PR description. Changed browser tests are not added automatically.
 - `publish/action.yml` compresses videos, uploads them to the service and keeps one PR comment up to date. `publish/review.jq` reads the `Browser review:` list from the PR description.
 - `skills/diff-stage-evidence` is the published agent skill. Users copy it from `vendor/diff-stage/recorder`, so keep it to one self-contained `SKILL.md`.
