@@ -5,9 +5,9 @@ port=$(php -r '$s=stream_socket_server("tcp://127.0.0.1:0"); echo parse_url("tcp
 php -S "127.0.0.1:$port" -t public > server.log 2>&1 &
 server=$!
 trap 'kill "$server"; rm -f server.log' EXIT
-export PR_PROOF_TEST_URL="http://127.0.0.1:$port"
+export DIFF_STAGE_TEST_URL="http://127.0.0.1:$port"
 for attempt in {1..50}; do
-    if curl -fsS "$PR_PROOF_TEST_URL" >/dev/null 2>&1; then break; fi
+    if curl -fsS "$DIFF_STAGE_TEST_URL" >/dev/null 2>&1; then break; fi
     sleep 0.1
 done
 php unsupported.php

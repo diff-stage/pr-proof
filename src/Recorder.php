@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PrProof;
+namespace DiffStage\Recorder;
 
 use Pest\TestSuite;
 use PHPUnit\Framework\TestCase;

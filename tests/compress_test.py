@@ -24,7 +24,7 @@ class CompressionTest(unittest.TestCase):
             source.write_text(json.dumps(raw))
             results = []
             for _ in range(2):
-                subprocess.run(['bash', str(ROOT / 'bin/pr-proof-compress'), str(video), str(output)], check=True)
+                subprocess.run(['bash', str(ROOT / 'bin/diff-stage-compress'), str(video), str(output)], check=True)
                 results.append(json.loads(Path(str(output) + '.json').read_text()))
             self.assertEqual(json.loads(source.read_text()), raw)
             self.assertEqual(results[0], results[1])

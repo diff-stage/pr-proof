@@ -8,9 +8,9 @@ use Amp\Websocket\Client\WebsocketConnection;
 use Generator;
 use Pest\Browser\Exceptions\PlaywrightOutdatedException;
 use PHPUnit\Framework\ExpectationFailedException;
-use PrProof\Overrides;
-use PrProof\Recorder;
-use PrProof\Telemetry;
+use DiffStage\Recorder\Overrides;
+use DiffStage\Recorder\Recorder;
+use DiffStage\Recorder\Telemetry;
 
 use function Amp\Websocket\Client\connect;
 

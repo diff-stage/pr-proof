@@ -1,4 +1,4 @@
-name: pr-proof select
+name: Diff Stage select
 description: Choose only browser test files explicitly requested in the PR description.
 
 inputs:

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PrProof;
+namespace DiffStage\Recorder;
 
 /**
  * Collects what happened during one recorded test: the steps a reviewer

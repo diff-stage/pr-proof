@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Turn a raw browser test recording into an MP4 a reviewer can follow.
-# Usage: pr-proof-compress input.webm output.mp4
+# Usage: diff-stage-compress input.webm output.mp4
 set -euo pipefail
 
 input=$1
