@@ -79,22 +79,25 @@ run_url=$(jq -r .url <<< "$run")
 
 queued=''
 if [[ "$fast" == true ]]; then
-  archive=$(mktemp --suffix=.zip)
-  trap 'rm -f "$archive"' EXIT
-  python3 - "$VIDEOS" "$archive" <<'PYTHON'
-from pathlib import Path
-import sys, zipfile
-root = Path(sys.argv[1])
-with zipfile.ZipFile(sys.argv[2], 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-    archive.write(root / 'titles.json', 'titles.json')
-    for video in sorted(root.glob('*.webm')):
-        archive.write(video, video.name)
-        telemetry = video.with_suffix('.json')
-        archive.write(telemetry, telemetry.name)
-PYTHON
+  archives=$(mktemp -d)
+  trap 'rm -rf "$archives"' EXIT
+  metadata=$(python3 "$(dirname "${BASH_SOURCE[0]}")/archives.py" "$VIDEOS" "$archives")
+  grants=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/recording-uploads" \
+    -H 'Content-Type: application/json' --data "$metadata")
+  while IFS= read -r grant; do
+    file=$(jq -r .file <<< "$grant")
+    url=$(jq -r .url <<< "$grant")
+    echo "::add-mask::$url"
+    headers=()
+    while IFS= read -r header; do headers+=(--header "$header"); done < <(
+      jq -r '.headers | to_entries[] | .key as $key | .value[] | $key + ": " + .' <<< "$grant"
+    )
+    curl --silent --show-error --fail-with-body -X PUT "${headers[@]}" \
+      --data-binary "@$archives/${file%.webm}.zip" "$url" >/dev/null
+  done < <(jq -c '.uploads[]' <<< "$grants")
   queued=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/recordings" \
-    -F "archive=@$archive;type=application/zip" --form-string "review=$review")
-  rm -f "$archive"
+    -H 'Content-Type: application/json' --data "$(jq -n --argjson review "$review" '{direct_upload:true,review:$review}')")
+  rm -rf "$archives"
   trap - EXIT
   echo "Recordings queued for server processing: $run_url"
 fi
