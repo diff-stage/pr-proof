@@ -36,7 +36,18 @@ jq -nr --argjson review "$review" '$review[].flow_key | select(IN($ARGS.position
 mapfile -t names < <(jq -rn --argjson review "$review" '($review | map(.flow_key)) as $keys
   | ($keys - ($keys - $ARGS.positional)) + ($ARGS.positional - $keys) | .[]' --args "${names[@]}")
 
+fast=false
+if jq -e '.capture_version == 1' "${videos[0]%.webm}.json" >/dev/null 2>&1; then
+  fast=true
+fi
+for video in "${videos[@]}"; do
+  captured_fast=false
+  if jq -e ".capture_version == 1" "${video%.webm}.json" >/dev/null 2>&1; then captured_fast=true; fi
+  [[ "$captured_fast" == "$fast" ]] || { echo "Cannot mix fast and legacy recordings." >&2; exit 1; }
+done
+if [[ "$fast" == false ]]; then
 command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; }
+fi
 if [[ -z "${DIFF_STAGE_TOKEN:-}" && ( -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ) ]]; then
   echo 'Allow id-token: write on the publishing job and connect this repository to the Diff Stage GitHub App. No api-token is needed.' >&2
   exit 1
@@ -66,6 +77,28 @@ run=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs" \
 run_id=$(jq -r .id <<< "$run")
 run_url=$(jq -r .url <<< "$run")
 
+queued=''
+if [[ "$fast" == true ]]; then
+  archive=$(mktemp --suffix=.zip)
+  trap 'rm -f "$archive"' EXIT
+  python3 - "$VIDEOS" "$archive" <<'PYTHON'
+from pathlib import Path
+import sys, zipfile
+root = Path(sys.argv[1])
+with zipfile.ZipFile(sys.argv[2], 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.write(root / 'titles.json', 'titles.json')
+    for video in sorted(root.glob('*.webm')):
+        archive.write(video, video.name)
+        telemetry = video.with_suffix('.json')
+        archive.write(telemetry, telemetry.name)
+PYTHON
+  queued=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/recordings" \
+    -F "archive=@$archive;type=application/zip" --form-string "review=$review")
+  rm -f "$archive"
+  trap - EXIT
+  echo "Recordings queued for server processing: $run_url"
+fi
+
 previews=''
 links=''
 reviewed=''
@@ -77,6 +110,10 @@ for name in "${names[@]}"; do
   mp4="${video%.webm}.mp4"
   poster="${video%.webm}.jpg"
 
+  entry=$(jq -c --arg key "$name" 'map(select(.flow_key == $key))[0] // empty' <<< "$review")
+  if [[ "$fast" == true ]]; then
+    uploaded=$(jq -c --arg key "$name" '.videos[] | select(.flow_key == $key) | . + {poster_public:false,poster_url:null}' <<< "$queued")
+  else
   bash "$COMPRESS" "$video" "$mp4"
   ffmpeg -v error -y -sseof -0.5 -i "$mp4" -frames:v 1 -q:v 3 "$poster"
 
@@ -92,6 +129,7 @@ for name in "${names[@]}"; do
   uploaded=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/videos" \
     --form-string "name=$title" --form-string "flow_key=$name" "${fields[@]}" \
     -F "telemetry=@$telemetry;type=application/json" -F "video=@$mp4;type=video/mp4" -F "poster=@$poster;type=image/jpeg")
+  fi
   video_url=$(jq -r '.url | @html' <<< "$uploaded")
   poster_url=$(jq -r '.poster_url | @html' <<< "$uploaded")
   escaped_title=$(jq -nr --arg title "$title" '$title | @html')
@@ -106,11 +144,14 @@ for name in "${names[@]}"; do
   links+=$(printf '<li><a href="%s">%s</a></li>' "$video_url" "$escaped_title")
 done
 
+if [[ "$fast" == false ]]; then
 api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/complete" \
   -H 'Content-Type: application/json' --data "{\"expected_videos\":${#videos[@]}}" >/dev/null
 
+fi
+
 if [[ "$MODE" == baseline ]]; then
-  echo "Approved baseline run: $run_url"
+  echo "Baseline run: $run_url"
   exit 0
 fi
 
@@ -121,6 +162,10 @@ trap 'rm -f "$body"' EXIT
   echo "### Browser test videos for ${HEAD_SHA::7}"
   echo
   echo "**[Watch all ${#videos[@]} on Diff Stage]($run_url)**"
+  if [[ "$fast" == true ]]; then
+    echo
+    echo 'Recordings are processing on Diff Stage and will appear here when ready.'
+  fi
   echo
   if [[ -n "$previews" ]]; then
     echo "<table><tr>$previews</tr></table>"

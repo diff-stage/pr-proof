@@ -26,10 +26,13 @@ final class Plugin implements HandlesArguments
         $only = $this->takeOption($arguments, '--record-videos-only', '');
         $pause = $this->takeOption($arguments, '--record-videos-pause', '700') ?? '700';
 
+        $fast = $this->takeOption($arguments, '--record-videos-fast', '1') !== null;
+
         Recorder::enable(
             $directory,
             $only === null ? null : array_values(array_filter(explode(',', $only))),
             (int) $pause,
+            $fast,
         );
 
         return $arguments;

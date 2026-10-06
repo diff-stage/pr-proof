@@ -26,7 +26,7 @@ it('moves the pointer visibly before clicking a scrolled control', function () {
         ->assertSeeIn('#result', 'Compatibility verified')
         ->assertNoJavaScriptErrors();
 
-    if (Recorder::enabled()) {
+    if (Recorder::enabled() && ! Recorder::fast()) {
         $moves = $page->script('() => window.moves');
         expect(count($moves))->toBeGreaterThan(15);
         expect(end($moves)['at'] - $moves[0]['at'])->toBeGreaterThan(250);
@@ -90,7 +90,13 @@ it('lands on an explicit click position inside a bordered control', function () 
     $page->page()->locator('button')->click(['position' => ['x' => 17, 'y' => 23]]);
     $page->assertSeeIn('#result', 'Compatibility verified')->assertNoJavaScriptErrors();
 
-    if (Recorder::enabled()) {
+    if (Recorder::fast()) {
+        expect($page->script('() => document.querySelector("[data-diff-stage-cursor]") === null'))->toBeTrue();
+        expect(count($page->script('() => window.moves')))->toBeLessThan(3);
+        file_put_contents(Recorder::pathForCurrentTest().'.expected', json_encode($page->script('() => window.clickPoint')));
+    }
+
+    if (Recorder::enabled() && ! Recorder::fast()) {
         $moves = $page->script('() => window.moves');
         $click = $page->script('() => window.clickPoint');
         $last = end($moves);
@@ -117,7 +123,7 @@ it('shows one cursor while clicking inside an iframe', function () {
     $page->page()->locator('iframe >> internal:control=enter-frame >> button')->click();
     $page->assertSee('Frame choice saved')->assertNoJavaScriptErrors();
 
-    if (Recorder::enabled()) {
+    if (Recorder::enabled() && ! Recorder::fast()) {
         expect($page->script(<<<'JS'
             () => {
                 const frame = document.querySelector('iframe');

@@ -42,6 +42,7 @@ jobs:
           npm install --no-save --package-lock=false "playwright@$PLAYWRIGHT"
           npx playwright install --with-deps chromium
           bash run.sh
+          bash run.sh --record-videos-fast
       - name: Browser 5 tracing still works while recording
         if: matrix.browser == '5.1.2'
         working-directory: tests/recording

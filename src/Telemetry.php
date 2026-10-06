@@ -14,6 +14,12 @@ final class Telemetry
 
     private const ASSERTIONS = ['assertSee', 'assertDontSee', 'assertSeeIn', 'assertDontSeeIn', 'assertPathIs', 'assertUrlIs', 'assertVisible', 'assertChecked', 'assertNotChecked', 'assertEnabled', 'assertButtonEnabled', 'assertDisabled', 'assertButtonDisabled', 'assertValue', 'assertSelected'];
 
+    /** @var list<array{at: float, x: float, y: float, method: string, screenshot: string}> */
+    private static array $cursor = [];
+
+    /** @var list<array{at: float, screenshot: string}> */
+    private static array $holds = [];
+
     private static ?float $startedAt = null;
 
     /**
@@ -52,6 +58,8 @@ final class Telemetry
 
     public static function begin(): void
     {
+        self::$cursor = [];
+        self::$holds = [];
         self::$startedAt = microtime(true);
         self::$steps = [];
         self::$problems = [];
@@ -210,6 +218,10 @@ final class Telemetry
 
         $result = ['steps' => self::$steps, 'problems' => self::$problems, 'assertions' => self::$assertions];
 
+        if (Recorder::fast()) {
+            $result += ['capture_version' => 1, 'cursor' => self::$cursor, 'holds' => self::$holds];
+        }
+
         self::$startedAt = null;
         self::$typedValues = [];
 
@@ -359,6 +371,17 @@ final class Telemetry
         $keys = array_filter(array_map(fn (string $pair): string => explode('=', $pair, 2)[0], explode('&', $parts['query'])), fn (string $key): bool => $key !== '');
 
         return $path.'?'.implode('&', array_map(fn (string $key): string => "{$key}=…", $keys));
+    }
+
+    /** @param array{x: float, y: float} $target */
+    public static function cursor(array $target, string $method, string $screenshot): void
+    {
+        self::$cursor[] = ['at' => self::now(), ...$target, 'method' => $method, 'screenshot' => $screenshot];
+    }
+
+    public static function hold(string $screenshot): void
+    {
+        self::$holds[] = ['at' => self::now(), 'screenshot' => $screenshot];
     }
 
     private static function now(): float

@@ -31,7 +31,7 @@ Commit first so the recording matches a SHA. Then, with a clean working tree:
 
 ```bash
 rm -rf tests/Browser/Videos
-./vendor/bin/pest tests/Browser/BookingTest.php tests/Browser/CheckoutTest.php --record-videos --record-videos-only=tests/Browser/BookingTest.php,tests/Browser/CheckoutTest.php
+./vendor/bin/pest tests/Browser/BookingTest.php tests/Browser/CheckoutTest.php --record-videos --record-videos-fast --record-videos-only=tests/Browser/BookingTest.php,tests/Browser/CheckoutTest.php
 git rev-parse HEAD | cut -c1-7
 ```
 

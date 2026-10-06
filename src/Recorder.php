@@ -19,6 +19,8 @@ final class Recorder
 
     private static int $pause = 700;
 
+    private static bool $fast = false;
+
     /**
      * @var array<string, string>
      */
@@ -27,11 +29,12 @@ final class Recorder
     /**
      * @param  array<int, string>|null  $only
      */
-    public static function enable(string $directory, ?array $only, int $pause): void
+    public static function enable(string $directory, ?array $only, int $pause, bool $fast = false): void
     {
         self::$directory = rtrim($directory, '/');
         self::$only = $only;
-        self::$pause = $pause;
+        self::$pause = $fast ? 0 : $pause;
+        self::$fast = $fast;
 
         if (! is_dir(self::$directory)) {
             mkdir(self::$directory, 0777, true);
@@ -90,9 +93,14 @@ final class Recorder
         return self::$pause;
     }
 
+    public static function fast(): bool
+    {
+        return self::$fast;
+    }
+
     public static function cursorOverlay(): string
     {
-        return (string) file_get_contents(__DIR__.'/../resources/cursor-overlay.js');
+        return self::$fast ? '(() => {})();' : (string) file_get_contents(__DIR__.'/../resources/cursor-overlay.js');
     }
 
     private static function testFile(TestCase $test): string

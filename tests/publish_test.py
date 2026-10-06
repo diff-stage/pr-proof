@@ -1,6 +1,9 @@
 """Exercise the actual publisher against an HTTP server and command boundaries."""
 from html.parser import HTMLParser
 import json
+import io
+import zipfile
+from email.parser import BytesParser
 import os
 from pathlib import Path
 import re
@@ -74,6 +77,9 @@ class PublishTest(unittest.TestCase):
                     self.end_headers()
                     return
                 response = {'id': 'run1', 'url': 'http://watch/run1', 'poster_url': 'http://poster'}
+                if self.path.endswith('/recordings'):
+                    response['processing'] = True
+                    response['videos'] = [{'flow_key': name, 'url': 'http://watch/run1#'+name} for name in ('booking', 'checkout')]
                 if owner.poster_public is not None:
                     response['poster_public'] = owner.poster_public
                 self.send_response(200)
@@ -136,6 +142,29 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         return dict(DIFF_STAGE_TOKEN='',
                     ACTIONS_ID_TOKEN_REQUEST_URL=f'http://127.0.0.1:{self.server.server_port}/identity?job=123',
                     ACTIONS_ID_TOKEN_REQUEST_TOKEN='request-token')
+
+    def test_fast_capture_uploads_once_without_encoding_or_waiting_for_rendering(self):
+        titles = {}
+        for name in ('booking', 'checkout'):
+            titles[name + '.webm'] = 'ExampleTest › ' + name
+            (self.path / (name + '.json')).write_text(json.dumps({'capture_version': 1, 'cursor': [], 'holds': [], 'steps': [], 'assertions': [], 'problems': []}))
+        (self.path / 'titles.json').write_text(json.dumps(titles))
+        self.stub('ffmpeg', 'echo "Encoding should be hosted" >&2; exit 1')
+        self.stub('compress', 'echo "Encoding should be hosted" >&2; exit 1')
+        result = self.run_publish(**self.identity_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([path for path, *_ in self.requests], ['/api/runs', '/api/runs/run1/recordings'])
+        self.assertEqual(len(self.identity_requests), 2)
+        _, body, content_type = self.requests[-1]
+        message = BytesParser().parsebytes(('Content-Type: ' + content_type + '\r\nMIME-Version: 1.0\r\n\r\n').encode() + body)
+        archive_part = next(part for part in message.walk() if part.get_param('name', header='Content-Disposition') == 'archive')
+        with zipfile.ZipFile(io.BytesIO(archive_part.get_payload(decode=True))) as archive:
+            self.assertEqual(sorted(archive.namelist()), ['booking.json', 'booking.webm', 'checkout.json', 'checkout.webm', 'titles.json'])
+            self.assertEqual(json.loads(archive.read('booking.json'))['capture_version'], 1)
+        comment = (self.path / 'comment.md').read_text()
+        self.assertIn('processing on Diff Stage', comment)
+        self.assertIn('http://watch/run1#booking', comment)
+        self.assertNotIn('<img', comment)
 
     def test_app_identity_uploads_without_a_project_secret(self):
         result = self.run_publish(**self.identity_env())
