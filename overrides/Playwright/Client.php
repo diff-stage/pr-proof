@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Pest\Browser\Playwright;
 
 use Amp\Websocket\Client\WebsocketConnection;
-use Generator;
-use Pest\Browser\Exceptions\PlaywrightOutdatedException;
-use PHPUnit\Framework\ExpectationFailedException;
+use DiffStage\Recorder\Cursor;
 use DiffStage\Recorder\Overrides;
 use DiffStage\Recorder\Recorder;
 use DiffStage\Recorder\Telemetry;
+use Generator;
+use Pest\Browser\Exceptions\PlaywrightOutdatedException;
+use PHPUnit\Framework\ExpectationFailedException;
 
 use function Amp\Websocket\Client\connect;
 
@@ -101,11 +102,12 @@ final class Client
 
         $retry = Telemetry::isRetry($method, $params);
 
+        Telemetry::action($method, $params);
+
         if (! $retry && Recorder::enabled() && in_array($method, self::PAUSED_ACTIONS, true) && Recorder::pathForCurrentTest() !== null) {
             usleep(Recorder::pause() * 1000);
+            Cursor::approach($this, $guid, $method, $params);
         }
-
-        Telemetry::action($method, $params);
 
         $this->websocketConnection->sendText($requestJson);
 
@@ -116,6 +118,7 @@ final class Client
 
             if (is_array($response)) {
                 Telemetry::observe($response);
+                Cursor::observe($response);
             }
 
             if (isset($response['error']['error']['message'])) {
