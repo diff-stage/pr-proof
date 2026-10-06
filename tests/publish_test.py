@@ -7,6 +7,7 @@ from email.parser import BytesParser
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -52,6 +53,8 @@ class PublishTest(unittest.TestCase):
         self.identity_value = 'github-identity'
         self.upload_status = 200
         self.poster_public = None
+        self.public_url = None
+        self.complete_status = 200
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -66,6 +69,11 @@ class PublishTest(unittest.TestCase):
                 owner.credentials.append(self.headers['Authorization'])
                 body = self.rfile.read(int(self.headers['Content-Length']))
                 owner.requests.append((self.path, body, self.headers['Content-Type']))
+                if self.path.endswith('/complete') and owner.complete_status != 200:
+                    self.send_response(owner.complete_status)
+                    self.end_headers()
+                    self.wfile.write(b'{"message":"Upload count does not match expected_videos."}')
+                    return
                 if owner.upload_status != 200:
                     self.send_response(owner.upload_status)
                     self.end_headers()
@@ -82,6 +90,13 @@ class PublishTest(unittest.TestCase):
                     response['videos'] = [{'flow_key': name, 'url': 'http://watch/run1#'+name} for name in ('booking', 'checkout')]
                 if owner.poster_public is not None:
                     response['poster_public'] = owner.poster_public
+                if owner.public_url:
+                    response['url'] = owner.public_url + '/runs/run1'
+                    response['poster_url'] = owner.public_url + '/videos/video1/poster'
+                    if self.path.endswith('/videos'):
+                        response['url'] += '#video1'
+                    if self.path.endswith('/recordings'):
+                        response['videos'] = [{'flow_key': name, 'url': response['url'] + '#' + name} for name in ('booking', 'checkout')]
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -142,6 +157,83 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
         return dict(DIFF_STAGE_TOKEN='',
                     ACTIONS_ID_TOKEN_REQUEST_URL=f'http://127.0.0.1:{self.server.server_port}/identity?job=123',
                     ACTIONS_ID_TOKEN_REQUEST_TOKEN='request-token')
+
+    def route_endpoint_to_server(self, endpoint):
+        """Keep requested URLs observable while real curl sends HTTP to our fixture."""
+        self.env.update(TEST_ENDPOINT=endpoint.rstrip('/'), TEST_SERVER=self.env['DIFF_STAGE_URL'],
+                        CURL_URL_LOG=str(self.path / 'curl-urls.json'), REAL_CURL=shutil.which('curl'))
+        file = self.path / 'curl'
+        file.write_text('''#!/usr/bin/env python3
+import json, os, subprocess, sys
+args = sys.argv[1:]
+urls = [arg for arg in args if arg.startswith(('https://', 'http://'))]
+with open(os.environ['CURL_URL_LOG'], 'a') as log:
+    log.write(json.dumps(urls) + '\\n')
+endpoint = os.environ['TEST_ENDPOINT']
+args = [os.environ['TEST_SERVER'] + arg[len(endpoint):] if arg.startswith(endpoint + '/') else arg for arg in args]
+sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
+''')
+        file.chmod(0o755)
+
+    def requested_api_urls(self):
+        return [url for line in (self.path / 'curl-urls.json').read_text().splitlines()
+                for url in json.loads(line) if '/api/' in url]
+
+    def action_default_url(self):
+        action = (ROOT / 'publish/action.yml').read_text()
+        self.assertIn('DIFF_STAGE_URL: ${{ inputs.url }}', action)
+        return re.search(r'^  url:\n(?:    .*\n)*?    default: (\S+)', action, re.M).group(1)
+
+    def test_action_default_publishes_with_identity_and_service_links(self):
+        endpoint = self.action_default_url()
+        self.assertEqual(endpoint, 'https://diffstage.com')
+        self.route_endpoint_to_server(endpoint)
+        self.public_url = endpoint
+        result = self.run_publish(DIFF_STAGE_URL=endpoint, **self.identity_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.requested_api_urls(), [endpoint + path for path in (
+            '/api/runs', '/api/runs/run1/videos', '/api/runs/run1/videos', '/api/runs/run1/complete')])
+        self.assertEqual(self.credentials, ['Bearer github-identity'] * 4)
+        self.assertEqual(json.loads(self.requests[-1][1]), {'expected_videos': 2})
+        comment = (self.path / 'comment.md').read_text()
+        self.assertIn('[Watch all 2 on Diff Stage](https://diffstage.com/runs/run1)', comment)
+        self.assertEqual([link['href'] for link in self.comment().links], [endpoint + '/runs/run1#video1'] * 4)
+        self.assertEqual([image['src'] for image in self.comment().images], [endpoint + '/videos/video1/poster'] * 2)
+
+    def test_action_default_fast_capture_uses_recordings_api_and_service_links(self):
+        endpoint = self.action_default_url()
+        self.route_endpoint_to_server(endpoint)
+        self.public_url = endpoint
+        for name in ('booking', 'checkout'):
+            (self.path / (name + '.json')).write_text(json.dumps({'capture_version': 1}))
+        (self.path / 'titles.json').write_text('{}')
+        result = self.run_publish(DIFF_STAGE_URL=endpoint, **self.identity_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.requested_api_urls(), [endpoint + '/api/runs', endpoint + '/api/runs/run1/recordings'])
+        self.assertEqual(self.credentials, ['Bearer github-identity'] * 2)
+        self.assertEqual([link['href'] for link in self.comment().links], [endpoint + '/runs/run1#booking', endpoint + '/runs/run1#checkout'])
+
+    def test_custom_endpoint_preserves_path_and_service_returned_urls(self):
+        endpoint = 'https://self-hosted.example/diff-stage/'
+        self.route_endpoint_to_server(endpoint)
+        self.public_url = 'https://evidence.example'
+        result = self.run_publish(DIFF_STAGE_URL=endpoint)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.requested_api_urls(), [endpoint.rstrip('/') + path for path in (
+            '/api/runs', '/api/runs/run1/videos', '/api/runs/run1/videos', '/api/runs/run1/complete')])
+        self.assertEqual(self.credentials, ['Bearer test'] * 4)
+        self.assertEqual(self.identity_requests, [])
+        self.assertIn('[Watch all 2 on Diff Stage](https://evidence.example/runs/run1)', (self.path / 'comment.md').read_text())
+        self.assertEqual([link['href'] for link in self.comment().links], ['https://evidence.example/runs/run1#video1'] * 4)
+
+    def test_failed_completion_never_comments(self):
+        self.complete_status = 409
+        result = self.run_publish(**self.identity_env())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Upload count does not match', result.stderr)
+        self.assertEqual(len(self.uploads()), 2)
+        self.assertTrue(self.requests[-1][0].endswith('/complete'))
+        self.assertFalse((self.path / 'gh.log').exists())
 
     def test_fast_capture_uploads_once_without_encoding_or_waiting_for_rendering(self):
         titles = {}

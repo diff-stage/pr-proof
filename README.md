@@ -76,7 +76,7 @@ Completing a PR run pins its baseline videos. Later approvals do not change that
 
 ## Post videos on pull requests
 
-Install the Diff Stage GitHub App and connect your repositories in Diff Stage. Then add this workflow, filling in your app and browser test setup. GitHub Actions authenticates the upload, so you don't need a repository secret or service URL.
+Install the Diff Stage GitHub App and connect your repositories at [diffstage.com](https://diffstage.com). Then add this workflow, filling in your app and browser test setup. GitHub Actions authenticates the upload, so you don't need a repository secret or service URL.
 
 ```yaml
 on:
@@ -150,7 +150,9 @@ The examples use `v0.2.0`. You can pin full commit SHAs instead. The `v0.1.0` se
 
 Keep your existing regression jobs independent of this workflow. Empty evidence selection must not skip regression tests or turn them into reviewer videos.
 
-For self-hosted services or projects without an App connection, the existing `url` and `api-token` inputs still work. An explicit project token takes precedence over GitHub identity.
+The publisher defaults to `https://diffstage.com`. Set `url` to override the endpoint for a self-hosted service. An explicit `api-token` takes precedence over GitHub identity for services that support project tokens. The hosted service requires a GitHub App connection and GitHub Actions identity.
+
+Existing workflow pins keep their original default until you update them to a commit containing this change. To use the new domain with an older publisher, add `url: https://diffstage.com` under its `with` inputs. Replace any explicit Cloud hostname override too. The publisher uses the run, video and poster URLs returned by the service in its PR comment.
 
 `select` returns only browser test files explicitly requested in the PR description. Add one line with the smallest journeys that prove the diff:
 
