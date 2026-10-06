@@ -145,7 +145,7 @@ final class Telemetry
     /**
      * @param  array<string, mixed>  $params
      */
-    public static function action(string $method, array $params): void
+    public static function action(string $method, array $params, ?string $target = null): void
     {
         if (! self::active() || ! in_array($method, self::ACTIONS, true)) {
             return;
@@ -169,7 +169,7 @@ final class Telemetry
         self::$lastAction = self::key($method, $params);
         self::$lastActionFailed = false;
 
-        $target = Selector::describe((string) ($params['selector'] ?? ''));
+        $target = $target === null ? Selector::describe((string) ($params['selector'] ?? '')) : self::assertionText($target);
 
         $text = match ($method) {
             'click', 'tap' => "Clicked {$target}",
@@ -261,7 +261,7 @@ final class Telemetry
      */
     private static function navigated(string $frame, array $params): void
     {
-        $url = (string) ($params['url'] ?? '');
+        $url = explode('#', (string) ($params['url'] ?? ''), 2)[0];
 
         if (! isset(self::$mainFrames[$frame]) || $url === '' || str_starts_with($url, 'about:') || $url === self::$lastUrl) {
             return;

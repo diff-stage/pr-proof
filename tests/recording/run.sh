@@ -35,6 +35,14 @@ foreach ($files as $file) {
     $text = json_encode($captionData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (str_contains($text, "query-secret") || str_contains($text, "Compatibility verified") || str_contains($text, "Disposable private message")) throw new RuntimeException("Telemetry kept a typed or query value");
     if (! str_contains($text, "Opened /?token=…")) throw new RuntimeException("Missing redacted steps");
+    if (str_contains(basename($file), "names-css-targets")) {
+        $steps = array_column($data["steps"], "text");
+        if (count(array_filter($steps, fn ($step) => str_starts_with($step, "Opened "))) !== 1) throw new RuntimeException("Fragment changes became page opens");
+        if (count(array_filter($steps, fn ($step) => $step === "Clicked \"Player settings\"")) !== 2) throw new RuntimeException("Repeated clicks lost their readable names");
+        foreach (["Clicked \"Save message\"", "Hovered over \"Playback position\"", "Typed into \"Private message\"", "Clicked (entered text)", "Clicked `#unnamed`"] as $step) {
+            if (! in_array($step, $steps, true)) throw new RuntimeException("Missing named step: ".$step);
+        }
+    }
     $assertions = $data["assertions"];
     foreach ($assertions as $assertion) {
         if (! is_bool($assertion["passed"]) || $assertion["finished_at"] < $assertion["at"]) throw new RuntimeException("Invalid assertion outcome");

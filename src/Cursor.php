@@ -33,11 +33,13 @@ final class Cursor
             }
             if ($params['type'] === 'BrowserContext') {
                 self::$contexts[$params['guid']] = $params['initializer']['options'];
-            } elseif ($params['type'] === 'Page' && ! (self::$contexts[$message['guid']]['hasTouch'] ?? false)) {
+            } elseif ($params['type'] === 'Page') {
                 self::$pages[$params['initializer']['mainFrame']['guid']] = $params['guid'];
-                self::$positions[$params['guid']] = ['x' => 0.0, 'y' => 0.0];
+                if (! (self::$contexts[$message['guid']]['hasTouch'] ?? false)) {
+                    self::$positions[$params['guid']] = ['x' => 0.0, 'y' => 0.0];
+                }
                 self::$viewports[$params['guid']] = $params['initializer']['viewportSize'] ?? [];
-            } elseif ($params['type'] === 'Frame' && isset(self::$positions[$message['guid']])) {
+            } elseif ($params['type'] === 'Frame' && isset(self::$viewports[$message['guid']])) {
                 self::$pages[$params['guid']] = $message['guid'];
             }
         }
@@ -57,25 +59,36 @@ final class Cursor
     }
 
     /** @param array<string, mixed> $params */
-    public static function approach(Client $client, string $frame, string $method, array $params): void
+    public static function approach(Client $client, string $frame, string $method, array $params): ?string
     {
-        if (! in_array($method, ['click', 'dblclick', 'check', 'uncheck', 'hover', 'fill', 'type', 'selectOption'], true)
+        if (! in_array($method, ['click', 'dblclick', 'check', 'uncheck', 'hover', 'fill', 'type', 'selectOption', 'tap', 'press', 'setInputFiles'], true)
             || ! isset(self::$pages[$frame], $params['selector']) || ($params['trial'] ?? false)) {
-            return;
+            return null;
         }
 
         $page = self::$pages[$frame];
         $result = self::request($client, $frame, 'waitForSelector', [
-            'selector' => $params['selector'], 'state' => 'visible', 'strict' => $params['strict'] ?? true,
+            'selector' => $params['selector'], 'state' => in_array($method, ['press', 'setInputFiles'], true) ? 'attached' : 'visible', 'strict' => $params['strict'] ?? true,
             'timeout' => $params['timeout'] ?? $client->timeout(),
         ]);
         $element = $result['element']['guid'];
 
         try {
+            $label = self::request($client, $element, 'evaluateExpression', [
+                'expression' => Selector::labelExpression(),
+                'isFunction' => true, 'arg' => ['value' => ['v' => 'undefined'], 'handles' => []],
+            ])['value'];
+            $label = JavaScriptSerializer::parseValue($label);
+            $targetName = $label === '' ? null : $label;
+
+            if (! isset(self::$positions[$page]) || in_array($method, ['tap', 'press', 'setInputFiles'], true)) {
+                return $targetName;
+            }
+
             self::request($client, $element, 'scrollIntoViewIfNeeded');
             $box = self::request($client, $element, 'boundingBox')['value'];
             if ($box === null) {
-                return;
+                return $targetName;
             }
 
             $viewport = self::$viewports[$page];
@@ -97,7 +110,7 @@ final class Cursor
                 usleep(120_000);
                 Telemetry::cursor($target, $method, self::request($client, $page, 'screenshot', ['type' => 'png', 'fullPage' => false, 'scale' => 'css'])['binary']);
 
-                return;
+                return $targetName;
             }
 
             $start = self::$positions[$page];
@@ -105,7 +118,7 @@ final class Cursor
             $dy = $target['y'] - $start['y'];
             $distance = hypot($dx, $dy);
             if ($distance < 1) {
-                return;
+                return $targetName;
             }
 
             $duration = min(650, 180 + $distance * 0.45);
@@ -127,6 +140,8 @@ final class Cursor
                 self::request($client, $page, 'mouseMove', $point);
                 self::$positions[$page] = $point;
             }
+
+            return $targetName;
         } finally {
             self::request($client, $element, 'dispose');
         }
