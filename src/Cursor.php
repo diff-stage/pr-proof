@@ -12,6 +12,8 @@ final class Cursor
     /** @var array<string, string> */
     private static array $pages = [];
 
+    private static ?string $currentPage = null;
+
     /** @var array<string, array<string, mixed>> */
     private static array $contexts = [];
 
@@ -26,6 +28,9 @@ final class Cursor
     {
         if (($message['method'] ?? null) === '__create__') {
             $params = $message['params'];
+            if ($params['type'] === 'Page') {
+                self::$currentPage = $params['guid'];
+            }
             if ($params['type'] === 'BrowserContext') {
                 self::$contexts[$params['guid']] = $params['initializer']['options'];
             } elseif ($params['type'] === 'Page' && ! (self::$contexts[$message['guid']]['hasTouch'] ?? false)) {
@@ -43,6 +48,9 @@ final class Cursor
 
         if (($message['method'] ?? null) === '__dispose__') {
             $guid = $message['guid'];
+            if (self::$currentPage === $guid) {
+                self::$currentPage = null;
+            }
             unset(self::$positions[$guid], self::$viewports[$guid], self::$contexts[$guid], self::$pages[$guid]);
             self::$pages = array_filter(self::$pages, fn (string $page): bool => $page !== $guid);
         }
@@ -85,6 +93,13 @@ final class Cursor
                 $target = ['x' => $box['x'] + $border['x'] + $params['position']['x'], 'y' => $box['y'] + $border['y'] + $params['position']['y']];
             }
 
+            if (Recorder::fast()) {
+                usleep(120_000);
+                Telemetry::cursor($target, $method, self::request($client, $page, 'screenshot', ['type' => 'png', 'fullPage' => false, 'scale' => 'css'])['binary']);
+
+                return;
+            }
+
             $start = self::$positions[$page];
             $dx = $target['x'] - $start['x'];
             $dy = $target['y'] - $start['y'];
@@ -114,6 +129,13 @@ final class Cursor
             }
         } finally {
             self::request($client, $element, 'dispose');
+        }
+    }
+
+    public static function readingHold(): void
+    {
+        if (Recorder::fast() && Telemetry::active() && self::$currentPage !== null) {
+            Telemetry::hold(self::request(Client::instance(), self::$currentPage, 'screenshot', ['type' => 'png', 'fullPage' => false, 'scale' => 'css'])['binary']);
         }
     }
 

@@ -2,7 +2,7 @@
 
 Readable videos of your Pest browser tests, posted on the pull request.
 
-Reviewers see each changed flow working without checking out the branch. The recorder pauses before every click and keystroke, trims blank frames and adds reading time after recorded checks, so a two-second test becomes a video someone can follow.
+Reviewers see each changed flow working without checking out the branch. Fast capture keeps your tests moving. Diff Stage adds cursor movement and reading time after upload, while preserving real typing, scrolling and animations. Local recording with pauses remains available.
 
 ## Install
 
@@ -27,7 +27,10 @@ Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 req
 |---|---|---|
 | `--record-videos[=DIR]` | `tests/Browser/Videos` | Turns recording on and sets the output folder |
 | `--record-videos-only=A.php,B.php` | every test | Records only tests from these files; does not filter execution |
+| `--record-videos-fast` | off | Capture for hosted processing without cursor or action pauses |
 | `--record-videos-pause=MS` | `700` | Pause before each action |
+
+Use `--record-videos-fast` with the publish action for hosted processing. Each upload supports up to 50 recordings and a 50 MB ZIP. CI finishes after upload; the player refreshes when processing completes. Functional waits still run.
 
 Each test is saved as its own `.webm`, named after the test. Without `--record-videos`, Pest runs exactly as before.
 
@@ -98,7 +101,7 @@ jobs:
           persist-credentials: false
 
       - id: select
-        uses: diff-stage/recorder/select@v0.2.0
+        uses: diff-stage/recorder/select@v0.2.1
 
       # ...install dependencies, start your app and install Playwright here...
 
@@ -108,7 +111,7 @@ jobs:
         run: |
           rm -rf tests/Browser/Videos
           IFS=, read -ra tests <<< "$TESTS"
-          ./vendor/bin/pest "${tests[@]}" --record-videos --record-videos-only="$TESTS"
+          ./vendor/bin/pest "${tests[@]}" --record-videos --record-videos-fast --record-videos-only="$TESTS"
           git rev-parse HEAD > tests/Browser/Videos/sha.txt
 
       - if: steps.select.outputs.tests != ''
@@ -133,7 +136,7 @@ jobs:
           name: browser-videos-${{ github.event.pull_request.head.sha }}
           path: tests/Browser/Videos
 
-      - uses: diff-stage/recorder/publish@v0.2.0
+      - uses: diff-stage/recorder/publish@v0.2.1
 ```
 
 The two jobs keep PR code away from publishing rights:
@@ -215,7 +218,7 @@ jobs:
       - id: record
         run: ./vendor/bin/pest tests/Browser --record-videos
       - if: success() && steps.record.outcome == 'success'
-        uses: diff-stage/recorder/publish@v0.2.0
+        uses: diff-stage/recorder/publish@v0.2.1
         with:
           mode: baseline
 ```

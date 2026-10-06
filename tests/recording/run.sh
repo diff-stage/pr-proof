@@ -23,7 +23,16 @@ foreach ($files as $file) {
     $data = json_decode(file_get_contents($file), true, flags: JSON_THROW_ON_ERROR);
     if (count($data["steps"]) < 3) throw new RuntimeException("Missing recorded actions");
     if ($data["problems"] !== []) throw new RuntimeException("Unexpected browser problems");
-    $text = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $expected = substr($file, 0, -5).".webm.expected";
+    if (is_file($expected)) {
+        $point = json_decode(file_get_contents($expected), true);
+        $target = end($data["cursor"]);
+        if (abs($point["x"] - $target["x"]) > 1 || abs($point["y"] - $target["y"]) > 1) throw new RuntimeException("Fast capture missed the real click location");
+        if (strlen($target["screenshot"]) < 100) throw new RuntimeException("Fast capture omitted its viewport image");
+    }
+    $captionData = array_intersect_key($data, array_flip(["steps", "assertions", "problems"]));
+    if (isset($data["capture_version"]) && $data["capture_version"] !== 1) throw new RuntimeException("Unsupported fast capture version");
+    $text = json_encode($captionData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (str_contains($text, "query-secret") || str_contains($text, "Compatibility verified") || str_contains($text, "Disposable private message")) throw new RuntimeException("Telemetry kept a typed or query value");
     if (! str_contains($text, "Opened /?token=…")) throw new RuntimeException("Missing redacted steps");
     $assertions = $data["assertions"];

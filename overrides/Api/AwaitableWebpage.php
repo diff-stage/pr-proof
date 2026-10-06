@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pest\Browser\Api;
 
+use DiffStage\Recorder\Cursor;
 use DiffStage\Recorder\Overrides;
 use DiffStage\Recorder\Telemetry;
 use Pest\Browser\Exceptions\BrowserExpectationFailedException;
@@ -88,6 +89,9 @@ final readonly class AwaitableWebpage
             ServerManager::instance()->http()->throwLastThrowableIfNeeded();
 
             $passed = true;
+            if ($name === 'wait') {
+                Cursor::readingHold();
+            }
 
             return $result === $webpage
                 ? $this
