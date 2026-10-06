@@ -9,6 +9,25 @@ namespace DiffStage\Recorder;
  */
 final class Selector
 {
+    public static function labelExpression(): string
+    {
+        return <<<'JS'
+            (element) => {
+                const text = value => (value || '').replace(/\s+/g, ' ').trim();
+                const labelledBy = (element.getAttribute('aria-labelledby') || '').split(/\s+/)
+                    .map(id => element.ownerDocument.getElementById(id)?.textContent || '').join(' ');
+                const label = text(element.getAttribute('aria-label')) || text(labelledBy)
+                    || text(Array.from(element.labels || []).map(label => label.textContent).join(' '));
+                if (label) return label;
+                if (element.matches('button, a, [role="button"], [role="link"], option')) {
+                    const content = text(element.innerText);
+                    if (content) return content;
+                }
+                return text(element.getAttribute('title')) || text(element.getAttribute('placeholder'));
+            }
+            JS;
+    }
+
     public static function describe(string $selector): string
     {
         if ($selector === '') {

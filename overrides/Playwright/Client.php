@@ -102,12 +102,20 @@ final class Client
 
         $retry = Telemetry::isRetry($method, $params);
 
-        Telemetry::action($method, $params);
+        $target = null;
+        try {
+            if (! $retry && Recorder::enabled() && in_array($method, self::PAUSED_ACTIONS, true) && Recorder::pathForCurrentTest() !== null) {
+                usleep(Recorder::pause() * 1000);
+                $target = Cursor::approach($this, $guid, $method, $params);
+            }
+        } catch (ExpectationFailedException $exception) {
+            Telemetry::action($method, $params);
+            Telemetry::actionFailed();
 
-        if (! $retry && Recorder::enabled() && in_array($method, self::PAUSED_ACTIONS, true) && Recorder::pathForCurrentTest() !== null) {
-            usleep(Recorder::pause() * 1000);
-            Cursor::approach($this, $guid, $method, $params);
+            throw $exception;
         }
+
+        Telemetry::action($method, $params, $target);
 
         $this->websocketConnection->sendText($requestJson);
 
