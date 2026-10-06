@@ -52,6 +52,7 @@ class PublishTest(unittest.TestCase):
         self.storage_requests = []
         self.direct_upload_status = 200
         self.direct_metadata = []
+        self.compressed_metadata = []
         self.identity_requests = []
         self.credentials = []
         self.identity_status = 200
@@ -96,6 +97,15 @@ class PublishTest(unittest.TestCase):
                     self.end_headers()
                     return
                 response = {'id': 'run1', 'url': 'http://watch/run1', 'poster_url': 'http://poster'}
+                if self.path.endswith('/video-uploads'):
+                    files = json.loads(body)['files']
+                    owner.compressed_metadata.append(files)
+                    response = {'upload_id': f'upload{uploads + 1}', 'files': {role: {
+                        'url': f'http://127.0.0.1:{owner.server.server_port}/storage/upload{uploads + 1}/' + role,
+                        'headers': {'Content-Length': [str(file['size'])],
+                                    'Content-MD5': [base64.b64encode(bytes.fromhex(file['md5'])).decode()],
+                                    'Content-Type': [file['content_type']]}}
+                        for role, file in files.items()}}
                 if self.path.endswith('/recording-uploads'):
                     owner.direct_metadata = json.loads(body)['videos']
                     response = {'uploads': [{'file': video['file'],
@@ -129,7 +139,7 @@ class PublishTest(unittest.TestCase):
         self.addCleanup(self.server.shutdown)
         for name in ('checkout', 'booking'):
             (self.path / f'{name}.webm').write_bytes(b'video')
-        self.stub('ffmpeg', 'touch "${@: -1}"')
+        self.stub('ffmpeg', 'printf poster > "${@: -1}"')
         (self.path / 'comments.json').write_text('[]')
         self.stub('gh', '''echo "$*" >> "$GH_LOG"
 if [[ " $* " == *" --paginate "* ]]; then
@@ -210,8 +220,8 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         result = self.run_publish(DIFF_STAGE_URL=endpoint, **self.identity_env())
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.requested_api_urls(), [endpoint + path for path in (
-            '/api/runs', '/api/runs/run1/videos', '/api/runs/run1/videos', '/api/runs/run1/complete')])
-        self.assertEqual(self.credentials, ['Bearer github-identity'] * 4)
+            '/api/runs', '/api/runs/run1/video-uploads', '/api/runs/run1/videos', '/api/runs/run1/video-uploads', '/api/runs/run1/videos', '/api/runs/run1/complete')])
+        self.assertEqual(self.credentials, ['Bearer github-identity'] * 6)
         self.assertEqual(json.loads(self.requests[-1][1]), {'expected_videos': 2})
         comment = (self.path / 'comment.md').read_text()
         self.assertIn('[Watch all 2 on Diff Stage](https://diffstage.com/runs/run1)', comment)
@@ -238,8 +248,8 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         result = self.run_publish(DIFF_STAGE_URL=endpoint)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.requested_api_urls(), [endpoint.rstrip('/') + path for path in (
-            '/api/runs', '/api/runs/run1/videos', '/api/runs/run1/videos', '/api/runs/run1/complete')])
-        self.assertEqual(self.credentials, ['Bearer test'] * 4)
+            '/api/runs', '/api/runs/run1/video-uploads', '/api/runs/run1/videos', '/api/runs/run1/video-uploads', '/api/runs/run1/videos', '/api/runs/run1/complete')])
+        self.assertEqual(self.credentials, ['Bearer test'] * 6)
         self.assertEqual(self.identity_requests, [])
         self.assertIn('[Watch all 2 on Diff Stage](https://evidence.example/runs/run1)', (self.path / 'comment.md').read_text())
         self.assertEqual([link['href'] for link in self.comment().links], ['https://evidence.example/runs/run1#video1'] * 4)
@@ -301,6 +311,38 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         self.assertEqual(self.direct_metadata, metadata)
         self.assertEqual([body for _, body, _ in self.storage_requests], bodies)
 
+    def test_compressed_baselines_upload_media_to_storage_and_only_metadata_to_the_api(self):
+        result = self.run_publish(MODE='baseline', **self.identity_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.storage_requests), 4)
+        self.assertEqual(len(self.compressed_metadata), 2)
+        for index, (path, body, headers) in enumerate(self.storage_requests):
+            role = ('video', 'poster')[index % 2]
+            metadata = self.compressed_metadata[index // 2][role]
+            self.assertEqual(path, f'/storage/upload{index // 2 + 1}/' + role)
+            self.assertEqual(body, b'video' if role == 'video' else b'poster')
+            self.assertNotIn('Authorization', headers)
+            self.assertEqual(headers['Content-Type'], metadata['content_type'])
+            self.assertEqual(int(headers['Content-Length']), len(body))
+            self.assertEqual(headers['Content-MD5'], base64.b64encode(hashlib.md5(body).digest()).decode())
+            self.assertEqual(metadata['size'], len(body))
+            self.assertEqual(metadata['md5'], hashlib.md5(body).hexdigest())
+        for body in self.uploads():
+            self.assertIsNotNone(form_field(body, 'upload_id'))
+            self.assertNotIn(b'name="video";', body)
+            self.assertNotIn(b'name="poster";', body)
+            self.assertIn(b'name="telemetry";', body)
+        self.assertEqual(self.requests[-1][0], '/api/runs/run1/complete')
+        self.assertFalse((self.path / 'gh.log').exists())
+
+    def test_failed_compressed_storage_upload_never_registers_or_completes_a_run(self):
+        self.direct_upload_status = 403
+        result = self.run_publish(MODE='baseline', **self.identity_env())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([path for path, *_ in self.requests], ['/api/runs', '/api/runs/run1/video-uploads'])
+        self.assertEqual(len(self.storage_requests), 1)
+        self.assertFalse((self.path / 'gh.log').exists())
+
     def test_failed_direct_upload_never_queues_processing_or_comments(self):
         self.direct_upload_status = 403
         for name in ('booking', 'checkout'):
@@ -315,8 +357,8 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
     def test_app_identity_uploads_without_a_project_secret(self):
         result = self.run_publish(**self.identity_env())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.credentials, ['Bearer github-identity'] * 4)
-        self.assertEqual(len(self.identity_requests), 4)
+        self.assertEqual(self.credentials, ['Bearer github-identity'] * 6)
+        self.assertEqual(len(self.identity_requests), 6)
         for url, authorization in self.identity_requests:
             self.assertEqual(parse_qs(urlparse(url).query), {'job': ['123'], 'audience': ['diff-stage']})
             self.assertEqual(authorization, 'Bearer request-token')
@@ -327,14 +369,14 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
     def test_baseline_also_uses_app_identity(self):
         result = self.run_publish(MODE='baseline', **self.identity_env())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.credentials, ['Bearer github-identity'] * 4)
+        self.assertEqual(self.credentials, ['Bearer github-identity'] * 6)
         self.assertFalse((self.path / 'gh.log').exists())
 
     def test_explicit_project_token_takes_precedence(self):
         result = self.run_publish(**(self.identity_env() | {'DIFF_STAGE_TOKEN': 'project-token'}))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.identity_requests, [])
-        self.assertEqual(self.credentials, ['Bearer project-token'] * 4)
+        self.assertEqual(self.credentials, ['Bearer project-token'] * 6)
 
     def test_service_setup_errors_are_visible_and_stop_publication(self):
         self.upload_status = 403
@@ -363,8 +405,8 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         result = self.run_publish()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(self.requests[0][1]), dict(kind='pull_request', pull_request=42, sha='a'*40, branch='feature', recording_id='100:1'))
-        self.assertEqual([path for path, *_ in self.requests], ['/api/runs', '/api/runs/run1/videos', '/api/runs/run1/videos', '/api/runs/run1/complete'])
-        for (_, body, _), key in zip(self.requests[1:3], ('booking', 'checkout')):
+        self.assertEqual([path for path, *_ in self.requests], ['/api/runs', '/api/runs/run1/video-uploads', '/api/runs/run1/videos', '/api/runs/run1/video-uploads', '/api/runs/run1/videos', '/api/runs/run1/complete'])
+        for (_, body, _), key in zip([request for request in self.requests if request[0].endswith('/videos')], ('booking', 'checkout')):
             self.assertIn(f'name="flow_key"\r\n\r\n{key}'.encode(), body)
             self.assertIn(b'name="telemetry"; filename=', body)
             self.assertIn(b'"at":0.5', body)

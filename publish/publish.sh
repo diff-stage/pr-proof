@@ -72,6 +72,17 @@ api() {
   printf '%s' "$response"
 }
 
+storage_upload() {
+  local url=$1 file=$2 grant=$3
+  echo "::add-mask::$url"
+  local headers=()
+  while IFS= read -r header; do headers+=(--header "$header"); done < <(
+    jq -r '.headers | to_entries[] | .key as $key | .value[] | $key + ": " + .' <<< "$grant"
+  )
+  curl --silent --show-error --fail-with-body -X PUT "${headers[@]}" \
+    --data-binary "@$file" "$url" >/dev/null
+}
+
 run=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs" \
   -H "Content-Type: application/json" --data "$payload")
 run_id=$(jq -r .id <<< "$run")
@@ -87,13 +98,7 @@ if [[ "$fast" == true ]]; then
   while IFS= read -r grant; do
     file=$(jq -r .file <<< "$grant")
     url=$(jq -r .url <<< "$grant")
-    echo "::add-mask::$url"
-    headers=()
-    while IFS= read -r header; do headers+=(--header "$header"); done < <(
-      jq -r '.headers | to_entries[] | .key as $key | .value[] | $key + ": " + .' <<< "$grant"
-    )
-    curl --silent --show-error --fail-with-body -X PUT "${headers[@]}" \
-      --data-binary "@$archives/${file%.webm}.zip" "$url" >/dev/null
+    storage_upload "$url" "$archives/${file%.webm}.zip" "$grant"
   done < <(jq -c '.uploads[]' <<< "$grants")
   queued=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/recordings" \
     -H 'Content-Type: application/json' --data "$(jq -n --argjson review "$review" '{direct_upload:true,review:$review}')")
@@ -129,9 +134,19 @@ for name in "${names[@]}"; do
     fields=(--form-string "review_reason=$(jq -r .reason <<< "$entry")" --form-string "review_order=$(jq -r .order <<< "$entry")")
   fi
 
+  metadata=$(python3 "$(dirname "${BASH_SOURCE[0]}")/files.py" "$mp4" "$poster")
+  grant=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/video-uploads" \
+    -H 'Content-Type: application/json' --data "$metadata")
+  for role in video poster; do
+    file_grant=$(jq -c --arg role "$role" '.files[$role]' <<< "$grant")
+    file=$mp4
+    if [[ "$role" == poster ]]; then file=$poster; fi
+    storage_upload "$(jq -r .url <<< "$file_grant")" "$file" "$file_grant"
+  done
   uploaded=$(api -X POST "${DIFF_STAGE_URL%/}/api/runs/$run_id/videos" \
     --form-string "name=$title" --form-string "flow_key=$name" "${fields[@]}" \
-    -F "telemetry=@$telemetry;type=application/json" -F "video=@$mp4;type=video/mp4" -F "poster=@$poster;type=image/jpeg")
+    --form-string "upload_id=$(jq -r .upload_id <<< "$grant")" \
+    -F "telemetry=@$telemetry;type=application/json")
   fi
   video_url=$(jq -r '.url | @html' <<< "$uploaded")
   poster_url=$(jq -r '.poster_url | @html' <<< "$uploaded")
