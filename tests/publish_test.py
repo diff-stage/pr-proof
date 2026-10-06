@@ -1,6 +1,8 @@
 """Exercise the actual publisher against an HTTP server and command boundaries."""
 from html.parser import HTMLParser
 import json
+import base64
+import hashlib
 import io
 import zipfile
 from email.parser import BytesParser
@@ -47,6 +49,9 @@ class PublishTest(unittest.TestCase):
         self.path = Path(self.temp.name)
         self.requests = []
         self.fail_upload = 0
+        self.storage_requests = []
+        self.direct_upload_status = 200
+        self.direct_metadata = []
         self.identity_requests = []
         self.credentials = []
         self.identity_status = 200
@@ -64,6 +69,12 @@ class PublishTest(unittest.TestCase):
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({'value': owner.identity_value}).encode())
+
+            def do_PUT(self):
+                body = self.rfile.read(int(self.headers['Content-Length']))
+                owner.storage_requests.append((self.path, body, dict(self.headers)))
+                self.send_response(owner.direct_upload_status)
+                self.end_headers()
 
             def do_POST(self):
                 owner.credentials.append(self.headers['Authorization'])
@@ -85,6 +96,13 @@ class PublishTest(unittest.TestCase):
                     self.end_headers()
                     return
                 response = {'id': 'run1', 'url': 'http://watch/run1', 'poster_url': 'http://poster'}
+                if self.path.endswith('/recording-uploads'):
+                    owner.direct_metadata = json.loads(body)['videos']
+                    response = {'uploads': [{'file': video['file'],
+                        'url': f'http://127.0.0.1:{owner.server.server_port}/storage/' + video['file'],
+                        'headers': {'Content-Length': [str(video['size'])],
+                                    'Content-MD5': [base64.b64encode(bytes.fromhex(video['md5'])).decode()],
+                                    'Content-Type': ['application/zip']}} for video in owner.direct_metadata]}
                 if self.path.endswith('/recordings'):
                     response['processing'] = True
                     response['videos'] = [{'flow_key': name, 'url': 'http://watch/run1#'+name} for name in ('booking', 'checkout')]
@@ -206,11 +224,11 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         self.public_url = endpoint
         for name in ('booking', 'checkout'):
             (self.path / (name + '.json')).write_text(json.dumps({'capture_version': 1}))
-        (self.path / 'titles.json').write_text('{}')
+        (self.path / 'titles.json').write_text(json.dumps({name + '.webm': name for name in ('booking', 'checkout')}))
         result = self.run_publish(DIFF_STAGE_URL=endpoint, **self.identity_env())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.requested_api_urls(), [endpoint + '/api/runs', endpoint + '/api/runs/run1/recordings'])
-        self.assertEqual(self.credentials, ['Bearer github-identity'] * 2)
+        self.assertEqual(self.requested_api_urls(), [endpoint + path for path in ('/api/runs', '/api/runs/run1/recording-uploads', '/api/runs/run1/recordings')])
+        self.assertEqual(self.credentials, ['Bearer github-identity'] * 3)
         self.assertEqual([link['href'] for link in self.comment().links], [endpoint + '/runs/run1#booking', endpoint + '/runs/run1#checkout'])
 
     def test_custom_endpoint_preserves_path_and_service_returned_urls(self):
@@ -235,7 +253,7 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         self.assertTrue(self.requests[-1][0].endswith('/complete'))
         self.assertFalse((self.path / 'gh.log').exists())
 
-    def test_fast_capture_uploads_once_without_encoding_or_waiting_for_rendering(self):
+    def test_fast_capture_uploads_each_recording_directly_without_encoding_or_waiting_for_rendering(self):
         titles = {}
         for name in ('booking', 'checkout'):
             titles[name + '.webm'] = 'ExampleTest › ' + name
@@ -245,18 +263,38 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         self.stub('compress', 'echo "Encoding should be hosted" >&2; exit 1')
         result = self.run_publish(**self.identity_env())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([path for path, *_ in self.requests], ['/api/runs', '/api/runs/run1/recordings'])
-        self.assertEqual(len(self.identity_requests), 2)
-        _, body, content_type = self.requests[-1]
-        message = BytesParser().parsebytes(('Content-Type: ' + content_type + '\r\nMIME-Version: 1.0\r\n\r\n').encode() + body)
-        archive_part = next(part for part in message.walk() if part.get_param('name', header='Content-Disposition') == 'archive')
-        with zipfile.ZipFile(io.BytesIO(archive_part.get_payload(decode=True))) as archive:
-            self.assertEqual(sorted(archive.namelist()), ['booking.json', 'booking.webm', 'checkout.json', 'checkout.webm', 'titles.json'])
-            self.assertEqual(json.loads(archive.read('booking.json'))['capture_version'], 1)
+        self.assertEqual([path for path, *_ in self.requests], ['/api/runs', '/api/runs/run1/recording-uploads', '/api/runs/run1/recordings'])
+        self.assertEqual(len(self.identity_requests), 3)
+        self.assertEqual(json.loads(self.requests[-1][1]), {'direct_upload': True, 'review': []})
+        self.assertEqual(len(self.storage_requests), 2)
+        for index, (path, body, headers) in enumerate(self.storage_requests):
+            metadata = self.direct_metadata[index]
+            name = metadata['file'].removesuffix('.webm')
+            self.assertEqual(path, '/storage/' + metadata['file'])
+            self.assertNotIn('Authorization', headers)
+            self.assertEqual(int(headers['Content-Length']), len(body))
+            self.assertEqual(headers['Content-MD5'], base64.b64encode(hashlib.md5(body).digest()).decode())
+            self.assertEqual(metadata['md5'], hashlib.md5(body).hexdigest())
+            with zipfile.ZipFile(io.BytesIO(body)) as archive:
+                self.assertEqual(sorted(archive.namelist()), [name + '.json', name + '.webm', 'titles.json'])
+                self.assertEqual(json.loads(archive.read(name + '.json'))['capture_version'], 1)
+                self.assertEqual(json.loads(archive.read('titles.json')), {metadata['file']: metadata['title']})
+                self.assertEqual(metadata['expanded_size'], sum(entry.file_size for entry in archive.infolist()))
         comment = (self.path / 'comment.md').read_text()
         self.assertIn('processing on Diff Stage', comment)
         self.assertIn('http://watch/run1#booking', comment)
         self.assertNotIn('<img', comment)
+
+    def test_failed_direct_upload_never_queues_processing_or_comments(self):
+        self.direct_upload_status = 403
+        for name in ('booking', 'checkout'):
+            (self.path / (name + '.json')).write_text(json.dumps({'capture_version': 1}))
+        (self.path / 'titles.json').write_text(json.dumps({name + '.webm': name for name in ('booking', 'checkout')}))
+        result = self.run_publish(**self.identity_env())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([path for path, *_ in self.requests], ['/api/runs', '/api/runs/run1/recording-uploads'])
+        self.assertEqual(len(self.storage_requests), 1)
+        self.assertFalse((self.path / 'gh.log').exists())
 
     def test_app_identity_uploads_without_a_project_secret(self):
         result = self.run_publish(**self.identity_env())
