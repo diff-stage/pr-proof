@@ -285,6 +285,22 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         self.assertIn('http://watch/run1#booking', comment)
         self.assertNotIn('<img', comment)
 
+    def test_retry_prepares_identical_uploads_after_artifact_timestamps_change(self):
+        for name in ('booking', 'checkout'):
+            (self.path / (name + '.json')).write_text(json.dumps({'capture_version': 1}))
+        (self.path / 'titles.json').write_text(json.dumps({name + '.webm': name for name in ('booking', 'checkout')}))
+        first = self.run_publish(**self.identity_env())
+        self.assertEqual(first.returncode, 0, first.stderr)
+        metadata = list(self.direct_metadata)
+        bodies = [body for _, body, _ in self.storage_requests]
+        self.storage_requests.clear()
+        for path in self.path.glob('*.webm'):
+            os.utime(path, (1000000000, 1000000000))
+        second = self.run_publish(**self.identity_env())
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.direct_metadata, metadata)
+        self.assertEqual([body for _, body, _ in self.storage_requests], bodies)
+
     def test_failed_direct_upload_never_queues_processing_or_comments(self):
         self.direct_upload_status = 403
         for name in ('booking', 'checkout'):
