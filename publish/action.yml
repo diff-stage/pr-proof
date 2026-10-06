@@ -9,10 +9,10 @@ inputs:
     description: Directory containing the recorded .webm files.
     default: tests/Browser/Videos
   api-token:
-    description: Optional project token for repositories without a Diff Stage GitHub App connection. Otherwise uses GitHub Actions identity.
+    description: Optional project token for self-hosted services that support it. Otherwise uses GitHub Actions identity.
   url:
     description: Diff Stage service URL.
-    default: https://pr-proof-production-it8ufh.laravel.cloud
+    default: https://diffstage.com
   token:
     description: Token that can comment on the pull request.
     default: ${{ github.token }}
