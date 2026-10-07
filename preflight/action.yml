@@ -1,0 +1,13 @@
+name: Diff Stage preflight
+description: Check GitHub App access before preparing the app or recording tests. Run in a trusted job without checking out repository code.
+inputs:
+  url:
+    description: Diff Stage service URL.
+    default: https://diffstage.com
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        DIFF_STAGE_URL: ${{ inputs.url }}
+      run: node "${{ github.action_path }}/preflight.cjs"

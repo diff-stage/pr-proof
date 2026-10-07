@@ -9,6 +9,8 @@ The goal is a short set of videos that show the change working, with a note on w
 
 This skill needs the Diff Stage recorder installed (`vendor/bin/diff-stage-compress` exists). If it isn't, tell the user and stop. Don't install packages or change CI unless they ask.
 
+Before preparing the app or recording in CI, use the `preflight` action in a trusted job with `id-token: write`, without checking out application code. It checks the connected GitHub repository and publication access. Reuse the project's existing browser CI and Docker environment. Keep identity and publishing permissions out of the recording job. Record the same scenarios on the default branch for comparisons.
+
 ## 1. Map changed files to journeys
 
 - Read the diff against the PR's base branch and the existing browser tests. `tests/Browser/**/*Test.php` is the default; the project's `select` action may use another `pattern`.
@@ -36,7 +38,7 @@ git rev-parse HEAD | cut -c1-7
 ```
 
 - `--record-videos-only` takes comma-separated paths relative to the project root and controls recording only. Positional file arguments tell Pest which tests to execute. Without them, Pest still executes its configured suite and only records the selected files.
-- Selection is per file. All browser tests in each selected file can produce videos. Check those journeys before selecting the file. Individual test selection needs a separate implementation decision.
+- Prefer exact scenario selection when only part of a file proves the diff. Save a JSON array such as `[{"file":"tests/Browser/BookingTest.php","test":"it confirms an accepted booking"}]` and run `vendor/bin/diff-stage-record selection.json --record-videos-fast` in the project's existing browser CI environment, including Docker. Use complete Pest names with `it` and describe groups. Names are literal; datasets run all variants. Missing files or unmatched names fail before recording. A whole-file entry uses `"test": null` and runs all its tests.
 - Run the project's required regression checks separately without recording. Passing a wider suite does not make every test reviewer evidence.
 - Each video's flow key is its filename without `.webm`, for example `bookingtest-it-confirms-an-accepted-booking`. Copy it from the file. Don't guess it from the test name.
 - If a selected test fails, fix it or report it. Never present a failed run, or a recording from an older commit, as evidence.
@@ -50,7 +52,8 @@ Add or update this section and keep the rest of the description:
 ```markdown
 ## Browser evidence
 
-Browser videos: tests/Browser/BookingTest.php, tests/Browser/CheckoutTest.php
+Browser videos: tests/Browser/BookingTest.php::it confirms an accepted booking
+Browser videos: tests/Browser/CheckoutTest.php::it shows why a card was declined
 
 Browser review:
 1. `bookingtest-it-confirms-an-accepted-booking`: `BookingController::accept` now confirms straight away. Watch the badge change to Confirmed after Accept.
@@ -61,8 +64,8 @@ Recorded locally at `abc1234`: 2 passed, both videos watched.
 Not shown: the confirmation email has no browser surface. `tests/Feature/BookingAcceptedMailTest.php` covers it.
 ```
 
-- `Browser videos:` is one line, at the start of a line, listing test files separated by commas. The selector returns only matching paths listed here, deduplicated. It never adds changed browser test files. Include changed and unchanged files only when their journeys prove this diff. Use `select@v0.2.0` or later; `v0.1.0` adds changed files automatically.
-- `Browser review:` lists videos in the order to watch them, one per line: `` N. `flow-key`: reason ``. Each reason says which change the video proves and where to look, in under 1000 characters. Diff Stage sends the reason and order with the upload and leads the PR comment with them. It skips items whose flow key wasn't recorded and logs a warning.
+- `Browser videos:` starts a line. Use one `file::complete Pest name` scenario per line, or comma-separated file paths to record whole files. Do not combine whole-file and scenario selection for the same file. The workflow must pass `select.outputs.selection` to `diff-stage-record`; the older `tests` output contains only paths and loses scenario selection. The selector returns only matching paths listed here, deduplicated. It never adds changed browser test files. Include changed and unchanged files only when their journeys prove this diff. Use `select@v0.2.0` or later; `v0.1.0` adds changed files automatically.
+- `Browser review:` adds notes, never execution or recording filters. It lists videos in the order to watch them, one per line: `` N. `flow-key`: reason ``. Each reason says which change the video proves and where to look, in under 1000 characters. Diff Stage sends the reason and order with the upload and leads the PR comment with them. It skips items whose flow key wasn't recorded and logs a warning.
 - Put omitted journeys and anything you couldn't show under "Not shown", with the reason or separate test coverage. Don't describe evidence you didn't produce. When selection is empty, omit the `Browser review:` list too.
 
 ## 5. Check CI evidence matches the head

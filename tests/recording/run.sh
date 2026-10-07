@@ -61,3 +61,16 @@ foreach ($files as $file) {
 for video in videos/*.webm; do
     ffprobe -v error -show_entries format=duration -of csv=p=0 "$video"
 done
+
+# Prove exact scenario selection against real Pest and Browser.
+selection=$(mktemp)
+trap 'kill "$server"; rm -f server.log "$selection"' EXIT
+cat > "$selection" <<'JSON'
+[
+  {"file":"tests/CursorTest.php","test":"it opens a menu through real pointer movement"},
+  {"file":"tests/CursorTest.php","test":"it keeps touch recordings free of a mouse cursor"}
+]
+JSON
+rm -rf selected-videos
+../../bin/diff-stage-record "$selection" --record-videos=selected-videos --record-videos-fast
+[[ $(find selected-videos -name '*.webm' | wc -l) == 2 ]]

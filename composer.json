@@ -17,7 +17,8 @@
         ]
     },
     "bin": [
-        "bin/diff-stage-compress"
+        "bin/diff-stage-compress",
+        "bin/diff-stage-record"
     ],
     "extra": {
         "pest": {

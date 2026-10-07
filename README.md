@@ -10,7 +10,7 @@ The Diff Stage recorder isn't on Packagist yet, so add its GitHub repository bef
 
 ```bash
 composer config repositories.diff-stage vcs https://github.com/diff-stage/recorder
-composer require --dev diff-stage/recorder:^0.2 -W
+composer require --dev diff-stage/recorder:dev-main -W
 ```
 
 `-W` lets Composer change PHPUnit to a version Pest supports. A fresh Laravel app needs it.
@@ -40,7 +40,22 @@ Pass file paths to Pest to limit execution as well as recording:
 ./vendor/bin/pest tests/Browser/BookingTest.php --record-videos --record-videos-only=tests/Browser/BookingTest.php
 ```
 
-All browser tests in a selected file can produce videos. Run your regression suite separately without `--record-videos`.
+File-only selection runs every browser test in the file. To run individual scenarios, save the selection as JSON and use the selection runner inside your existing test environment:
+
+```json
+[
+  {"file": "tests/Browser/WizardTest.php", "test": "it saves a draft"},
+  {"file": "tests/Browser/WizardTest.php", "test": "it completes the wizard"}
+]
+```
+
+```bash
+./vendor/bin/diff-stage-record selection.json --record-videos-fast
+```
+
+Use the complete Pest name, including `it` for `it()` tests and any describe groups. Names are literal, not regexes. A selected data-driven test runs all its dataset variants. Missing files or names fail before any recording starts. Use `"test": null` to select a whole file. Do not combine whole-file and scenario selection for the same file.
+
+Run your regression suite separately without recording.
 
 Next to each video, the recorder writes a `.json` file with what happened during the test:
 
@@ -68,6 +83,8 @@ Next to each video, the recorder writes a `.json` file with what happened during
 
 ## Compare approved flows
 
+Reuse the same test environment on your default branch and record the same files or scenarios. You can pass a checked-in JSON selection to `diff-stage-record` for baselines, or record whole files there. Scenario selection does not change flow keys.
+
 The service compares PR videos with the latest completed default-branch recording of the same flow. It shows baseline and PR videos side by side with paired playback controls, ordered actions and new or fixed browser problems. Without an approved recording to compare against, the service labels the PR video instead. "Baseline unavailable" means the project has no approved baseline yet. "No matching baseline" means no approved recording has this flow key. Neither label means the flow is new. The baseline may not be recorded yet, or the test may have been renamed.
 
 Each flow key is the recording filename without `.webm`. Renaming a test changes its filename and flow key, so it no longer matches its old baseline. Keep the same recording workflow for baseline uploads: its GitHub `run_number` orders approvals so a slower, older run cannot replace a newer baseline.
@@ -76,7 +93,7 @@ Completing a PR run pins its baseline videos. Later approvals do not change that
 
 ## Post videos on pull requests
 
-Install the Diff Stage GitHub App and connect your repositories at [diffstage.com](https://diffstage.com). Then add this workflow, filling in your app and browser test setup. GitHub Actions authenticates the upload, so you don't need a repository secret or service URL.
+Install the Diff Stage GitHub App and connect your repositories at [diffstage.com](https://diffstage.com). Adapt your existing browser workflow, including its Docker image, services, environment, fixtures and assets. Run the recorder in the same container where Pest already works. Use the following job structure. GitHub Actions authenticates the upload, so you don't need a repository secret or service URL.
 
 ```yaml
 on:
@@ -87,7 +104,18 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: diff-stage/recorder/preflight@main
+
   record:
+    needs: preflight
+    if: always() && (needs.preflight.result == 'success' || needs.preflight.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -101,17 +129,19 @@ jobs:
           persist-credentials: false
 
       - id: select
-        uses: diff-stage/recorder/select@v0.2.1
+        uses: diff-stage/recorder/select@main
 
-      # ...install dependencies, start your app and install Playwright here...
+      # Reuse your existing Docker/browser CI setup here.
+      # Gate expensive setup on steps.select.outputs.tests != ''.
 
       - if: steps.select.outputs.tests != ''
         env:
-          TESTS: ${{ steps.select.outputs.tests }}
+          SELECTION: ${{ steps.select.outputs.selection }}
         run: |
           rm -rf tests/Browser/Videos
-          IFS=, read -ra tests <<< "$TESTS"
-          ./vendor/bin/pest "${tests[@]}" --record-videos --record-videos-fast --record-videos-only="$TESTS"
+          printf '%s\n' "$SELECTION" > .diff-stage-selection.json
+          # Run this inside your existing test container when using Docker.
+          ./vendor/bin/diff-stage-record .diff-stage-selection.json --record-videos-fast
           git rev-parse HEAD > tests/Browser/Videos/sha.txt
 
       - if: steps.select.outputs.tests != ''
@@ -139,14 +169,15 @@ jobs:
       - uses: diff-stage/recorder/publish@v0.2.1
 ```
 
-The two jobs keep PR code away from publishing rights:
+The jobs keep PR code away from publishing rights:
 
+- `preflight` runs before app preparation, without checking out repository code. It requests GitHub identity and checks the App connection, current run and team plan. A failure stops the recording job. Fork and Dependabot PRs skip preflight and keep artifact-only recordings.
 - `record` checks out the PR's head commit, so the videos show the code the PR adds rather than GitHub's merge preview. It runs that code with a read-only token and no stored credentials.
 - `publish` never runs PR code. It downloads the recordings and uploads them. It needs `id-token: write` to request GitHub identity and `pull-requests: write` to post its comment.
 - The publisher refuses to upload if `sha.txt` names a different commit from the PR head.
 - Fork PRs still record, and their videos stay as workflow artifacts. They can't publish through the App. Never use `pull_request_target` to run PR code.
 
-The examples use `v0.2.0`. You can pin full commit SHAs instead. The `v0.1.0` selector adds changed files automatically, so use `v0.2.0` or later.
+Scenario selection and preflight require a commit containing this change. Pin a reviewed full commit SHA for `select`, `preflight` and the Composer package before using them in production. The `v0.1.0` selector adds changed files automatically, so use `v0.2.0` or later.
 
 Keep your existing regression jobs independent of this workflow. Empty evidence selection must not skip regression tests or turn them into reviewer videos.
 
@@ -154,13 +185,14 @@ The publisher defaults to `https://diffstage.com`. Set `url` to override the end
 
 Existing workflow pins keep their original default until you update them to a commit containing this change. To use the new domain with an older publisher, add `url: https://diffstage.com` under its `with` inputs. Replace any explicit Cloud hostname override too. The publisher uses the run, video and poster URLs returned by the service in its PR comment.
 
-`select` returns only browser test files explicitly requested in the PR description. Add one line with the smallest journeys that prove the diff:
+`select` returns a `selection` JSON output for the runner and a `tests` file list for gating setup. Add one line per scenario in the PR description:
 
 ```
-Browser videos: tests/Browser/CheckoutTest.php, tests/Browser/BookingTest.php
+Browser videos: tests/Browser/WizardTest.php::it saves a draft
+Browser videos: tests/Browser/WizardTest.php::it completes the wizard
 ```
 
-Changed browser test files are not added automatically. Check what each file demonstrates before selecting it, including unchanged tests that reach the changed behaviour. Paths must match the action's `pattern` regex, which defaults to `^tests/Browser/.+Test\.php$`. Matching paths are deduplicated; this is a file list, not a glob or individual test filter.
+Changed browser test files are not added automatically. Check what each file demonstrates before selecting it, including unchanged tests that reach the changed behaviour. Paths must match the action's `pattern` regex, which defaults to `^tests/Browser/.+Test\.php$`. File-only lines still accept comma-separated paths and run every test in those files. Scenario lines use `file::complete Pest name`, one per line. Selection is deduplicated. `Browser review:` only adds notes and ordering; it never limits execution or recording.
 
 If no journey meaningfully demonstrates the diff, leave `Browser videos:` empty or omit it. The selector outputs an empty `tests` value and logs that recording is skipped. The workflow above then skips recording and publication. List omitted journeys and their reasons in the PR description. Never substitute an unrelated smoke journey. A previous video comment may remain, so check its SHA before treating it as current evidence.
 

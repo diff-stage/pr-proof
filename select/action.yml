@@ -1,5 +1,5 @@
 name: Diff Stage select
-description: Choose only browser test files explicitly requested in the PR description.
+description: Choose files or exact scenarios explicitly requested in the PR description.
 
 inputs:
   pattern:
@@ -14,6 +14,10 @@ outputs:
     description: Comma-separated test files, empty when there is nothing to record.
     value: ${{ steps.choose.outputs.tests }}
 
+  selection:
+    description: JSON selection for diff-stage-record.
+    value: ${{ steps.choose.outputs.selection }}
+
 runs:
   using: composite
   steps:
@@ -23,11 +27,4 @@ runs:
         PR_BODY: ${{ github.event.pull_request.body }}
         PATTERN: ${{ inputs.pattern }}
       run: |
-        requested=$(printf '%s\n' "$PR_BODY" | tr -d '\r' | sed -n 's/^Browser videos: *//Ip' | tr ', ' '\n\n')
-        tests=$(printf '%s\n' "$requested" | grep -E "$PATTERN" | sort -u | paste -sd, - || true)
-        echo "tests=$tests" >> "$GITHUB_OUTPUT"
-        if [[ -n "$tests" ]]; then
-          echo "Recording requested browser tests: $tests"
-        else
-          echo "No matching Browser videos: files selected; skipping recording."
-        fi
+        node "${{ github.action_path }}/select.cjs"

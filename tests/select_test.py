@@ -21,7 +21,7 @@ class SelectTest(unittest.TestCase):
                       'printf "%s\\n" "$CHANGED_TESTS"\n')
         gh.chmod(0o755)
         action = (ROOT / 'select/action.yml').read_text()
-        self.script = textwrap.dedent(action.split('      run: |\n', 1)[1])
+        self.script = textwrap.dedent(action.split('      run: |\n', 1)[1]).replace('${{ github.action_path }}', str(ROOT / 'select'))
 
     def select(self, body='', pattern=DEFAULT_PATTERN):
         output = self.path / 'output'
@@ -35,7 +35,8 @@ class SelectTest(unittest.TestCase):
                                 env=env, cwd=self.path, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.path / 'gh.log').exists(), 'Selection queried the PR diff')
-        return output.read_text(), result.stdout
+        self.selection = __import__('json').loads(output.read_text().split('selection=', 1)[1])
+        return output.read_text().split('selection=', 1)[0], result.stdout
 
     def test_changed_browser_tests_without_requests_select_nothing(self):
         for body in ('', 'Changes tests/Browser/ChangedTest.php',
@@ -80,6 +81,16 @@ class SelectTest(unittest.TestCase):
                 output, log = self.select(body)
                 self.assertEqual(output, 'tests=\n')
                 self.assertIn('skipping recording', log)
+
+    def test_exact_scenarios_preserve_spaces_commas_regex_and_shell_characters(self):
+        name = 'it saves a [draft], with $(touch injected)'
+        self.select(f'Browser videos: tests/Browser/WizardTest.php::{name}\n'
+                    'Browser videos: tests/Browser/WizardTest.php::it finishes the wizard')
+        self.assertEqual(self.selection, [
+            {'file': 'tests/Browser/WizardTest.php', 'test': name},
+            {'file': 'tests/Browser/WizardTest.php', 'test': 'it finishes the wizard'},
+        ])
+        self.assertFalse((self.path / 'injected').exists())
 
     def test_request_must_start_a_line(self):
         output, _ = self.select('Please add Browser videos: tests/Browser/ChangedTest.php')
