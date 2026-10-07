@@ -6,3 +6,5 @@ tests/recording/videos/
 tests/recording/Traces/
 tests/recording/Screenshots/
 tests/recording/server.log
+tests/recording/selected-videos/
+__pycache__/

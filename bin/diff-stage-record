@@ -1,0 +1,96 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/** @param list<string> $command */
+function runSelectedTests(array $command, bool $quiet = false): int
+{
+    $process = proc_open($command, [0 => STDIN, 1 => $quiet ? ['pipe', 'w'] : STDOUT, 2 => STDERR], $pipes);
+    if ($process === false) {
+        throw new RuntimeException('Could not start Pest.');
+    }
+
+    $output = $quiet ? stream_get_contents($pipes[1]) : '';
+    if ($quiet) {
+        fclose($pipes[1]);
+    }
+    $status = proc_close($process);
+    if ($quiet && $status !== 0) {
+        fwrite(STDERR, $output);
+    }
+
+    return $status;
+}
+
+try {
+    if ($argc < 2) {
+        throw new RuntimeException('Usage: vendor/bin/diff-stage-record selection.json [--record-videos-fast] [--record-videos=directory]');
+    }
+    $selection = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
+    if (! is_array($selection) || ! array_is_list($selection) || $selection === []) {
+        throw new RuntimeException('Select at least one browser test.');
+    }
+    $options = array_slice($argv, 2);
+    foreach ($options as $option) {
+        if ($option !== '--record-videos-fast' && ! preg_match('/\A--record-videos(?:-pause)?=.+\z/', $option)) {
+            throw new RuntimeException('Unsupported recording option: '.$option);
+        }
+    }
+    if (! array_filter($options, fn (string $option): bool => str_starts_with($option, '--record-videos='))) {
+        $options[] = '--record-videos';
+    }
+    $files = [];
+    foreach ($selection as $entry) {
+        if (! is_array($entry) || ! isset($entry['file']) || ! is_string($entry['file'])
+            || ! preg_match('#\A[a-zA-Z0-9_./-]+\.php\z#', $entry['file'])
+            || str_starts_with($entry['file'], '/') || str_contains($entry['file'], '..') || ! is_file($entry['file'])
+            || ! array_key_exists('test', $entry) || ($entry['test'] !== null && (! is_string($entry['test']) || trim($entry['test']) === ''))) {
+            throw new RuntimeException('Selection must contain existing relative PHP files and exact scenario names.');
+        }
+        $files[$entry['file']][] = $entry['test'];
+    }
+    $commands = [];
+    foreach ($files as $file => $tests) {
+        $tests = array_unique($tests, SORT_REGULAR);
+        if (count($tests) > 1 && in_array(null, $tests, true)) {
+            throw new RuntimeException('Select either the whole file or individual scenarios for '.$file.', not both.');
+        }
+        $filters = [];
+        foreach ($tests as $test) {
+            $filter = $test === null ? null : '/::'.preg_quote($test, '/').'(?: with data set .+)?$/u';
+            $list = tempnam(sys_get_temp_dir(), 'diff-stage-tests-');
+            try {
+                $command = [PHP_BINARY, 'vendor/bin/pest', $file];
+                if ($filter !== null) {
+                    array_push($command, '--filter', $filter);
+                    $filters[] = preg_quote($test, '/');
+                }
+                array_push($command, '--list-tests-xml', $list);
+                if (runSelectedTests($command, true) !== 0) {
+                    throw new RuntimeException('Pest could not discover tests in '.$file.'.');
+                }
+                $xml = new DOMDocument;
+                if (! $xml->load($list, LIBXML_NONET) || $xml->getElementsByTagName('testMethod')->length === 0) {
+                    throw new RuntimeException('No tests match '.$file.($test === null ? '' : '::'.$test).'. Use the complete Pest name, including "it" and describe groups.');
+                }
+            } finally {
+                unlink($list);
+            }
+        }
+        $command = [PHP_BINARY, 'vendor/bin/pest', $file, ...$options];
+        if ($filters !== []) {
+            array_push($command, '--filter', '/::(?:'.implode('|', $filters).')(?: with data set .+)?$/u');
+        }
+        $commands[] = $command;
+    }
+    foreach ($commands as $command) {
+        $status = runSelectedTests($command);
+        if ($status !== 0) {
+            exit($status);
+        }
+    }
+} catch (Throwable $exception) {
+    fwrite(STDERR, $exception->getMessage()."\n");
+    exit(1);
+}

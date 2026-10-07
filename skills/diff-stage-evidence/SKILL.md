@@ -1,72 +1,94 @@
 ---
 name: diff-stage-evidence
-description: Prepare browser video evidence for a pull request in a project that records Pest browser tests with the Diff Stage recorder. Use while preparing or updating a PR to choose the journeys a reviewer should watch, add missing browser tests, record them at the current commit, and write the Browser videos and Browser review lines in the PR description.
+description: Prepare or update PR browser evidence with the Diff Stage Pest recorder. Use to select existing scenarios, record the current commit, write Browser videos and Browser review, and verify published playback.
 ---
 
 # Prepare PR browser evidence
 
-The goal is a short set of videos that show the change working, with a note on what to look at in each. A reviewer should be able to watch them in order without opening the code. Show only what the change does. Leave out loosely related flows.
+Finish with a small set of current-commit videos, a note explaining what each proves, and the checks or blockers in the PR description. Keep required regression checks separate from reviewer recordings.
 
-This skill needs the Diff Stage recorder installed (`vendor/bin/diff-stage-compress` exists). If it isn't, tell the user and stop. Don't install packages or change CI unless they ask.
+## 1. Check the environment and publication access
 
-## 1. Map changed files to journeys
+Inspect the project's existing browser tests and CI. Reuse its Docker image, services, database, fixtures, asset build and test command. Run the recorder inside that environment.
 
-- Read the diff against the PR's base branch and the existing browser tests. `tests/Browser/**/*Test.php` is the default; the project's `select` action may use another `pattern`.
-- For each user-visible change, pick the smallest journey that shows it: an existing test, or one you add. Record which changed files each journey demonstrates. That mapping goes in the PR.
-- Select evidence deliberately. A changed browser test is only a candidate, not a reason to publish its video. List every selected file explicitly, including changed files. Never copy all changed browser test files into the selection without checking what each proves.
-- Skip changes with no browser-visible effect, and say which other tests cover them. Don't record an unrelated flow to fill the gap.
-- If no journey meaningfully proves the diff, leave `Browser videos:` empty and explain why under "Not shown". Do not substitute a smoke journey. No selection means no reviewer recordings.
-- This is a demonstration, not a coverage report. Never claim the videos cover every affected test or path.
+Confirm `vendor/diff-stage/recorder/bin/diff-stage-record` exists. If it is missing, report the installation requirement. Change dependencies or CI only within the user's authorized scope.
 
-## 2. Add or adjust tests where needed
+Before CI prepares the app, run the pinned `diff-stage/recorder/preflight` action in a trusted job with `id-token: write` and no application checkout. Make recording depend on its success. Keep identity and publishing permissions in trusted jobs; fork and Dependabot PRs produce artifacts only. On failure, report the response and the repository connection or team-plan issue it identifies.
 
-- Add a test when no existing one reaches the changed screen or state. Follow the project's browser test conventions, factories and fixtures.
-- Assert the end state on screen, such as the confirmation text, so the video ends on proof instead of a redirect.
-- Keep one journey per test, and keep it short. The recorder pauses before actions, and video processing adds reading time after captured checks. Never add fixed waits to tests for presentation. Use readiness assertions for asynchronous behavior.
-- Use fake data. Videos show whatever is typed and rendered, and Diff Stage doesn't redact the picture.
+This step is complete when the recording environment is identified and publication access is confirmed, or an exact blocker is reported.
 
-## 3. Record at the current commit
+## 2. Select journeys that prove the diff
 
-Commit first so the recording matches a SHA. Then, with a clean working tree:
+Read the diff against the PR base and the existing browser tests. Map each browser-visible change to the smallest existing scenario that demonstrates it. Include changed test files only when their journeys prove the diff.
+
+When a journey is missing, add or adjust a test within the authorized scope. Follow the project's fixtures and browser conventions. Use disposable data, one journey per test, readiness assertions for asynchronous behavior, and a visible final outcome. The recorder captures typed and rendered data without redaction. Use recorder pacing rather than fixed presentation waits.
+
+Choose complete Pest names, including `it` and describe groups. Keep scenarios in their existing files. For changes without a useful browser demonstration, leave `Browser videos:` empty and name the independent checks under "Not shown".
+
+This step is complete when every selected scenario maps to a change and every omission has a reason.
+
+## 3. Record and inspect the current commit
+
+Run the required regression checks. Commit the changes, then record from a clean tree. Save the selected scenarios as a JSON array:
+
+```json
+[
+  {"file": "tests/Browser/BookingTest.php", "test": "it confirms an accepted booking"},
+  {"file": "tests/Browser/CheckoutTest.php", "test": "it shows why a card was declined"}
+]
+```
+
+Run in the existing browser environment:
 
 ```bash
 rm -rf tests/Browser/Videos
-./vendor/bin/pest tests/Browser/BookingTest.php tests/Browser/CheckoutTest.php --record-videos --record-videos-fast --record-videos-only=tests/Browser/BookingTest.php,tests/Browser/CheckoutTest.php
-git rev-parse HEAD | cut -c1-7
+mkdir -p tests/Browser/Videos
+git rev-parse HEAD > tests/Browser/Videos/sha.txt
+php vendor/diff-stage/recorder/bin/diff-stage-record selection.json --record-videos-fast
 ```
 
-- `--record-videos-only` takes comma-separated paths relative to the project root and controls recording only. Positional file arguments tell Pest which tests to execute. Without them, Pest still executes its configured suite and only records the selected files.
-- Selection is per file. All browser tests in each selected file can produce videos. Check those journeys before selecting the file. Individual test selection needs a separate implementation decision.
-- Run the project's required regression checks separately without recording. Passing a wider suite does not make every test reviewer evidence.
-- Each video's flow key is its filename without `.webm`, for example `bookingtest-it-confirms-an-accepted-booking`. Copy it from the file. Don't guess it from the test name.
-- If a selected test fails, fix it or report it. Never present a failed run, or a recording from an older commit, as evidence.
-- Watch each video. If you can't play video, run `vendor/bin/diff-stage-compress in.webm out.mp4` and inspect frames with `ffmpeg`. Check that the change is visible, the final state is readable, and no secret or personal data appears. A passing assertion doesn't prove the video is useful. If you couldn't inspect a video, say so.
-- Re-record after any commit that changes the recorded behaviour.
+The runner checks every file and name before recording. Names are literal; a dataset scenario runs all its variants. Use `"test": null` only when every scenario in the file is intended evidence. `--record-videos-only` filters recording, while Pest's positional paths control execution; the JSON runner handles scenario selection.
 
-## 4. Write the PR description
+Check that the run passed and every selected scenario produced its expected recordings. Copy flow keys from the filenames without `.webm`.
 
-Add or update this section and keep the rest of the description:
+Watch every video at normal speed through its final state. Confirm the changed behavior and outcome are readable and the footage contains no secrets or personal data. Compress with `vendor/bin/diff-stage-compress input.webm output.mp4` if needed. Sampled frames can locate details; mark full playback review pending if you cannot watch the footage. Recapture after changing recorded behavior.
+
+This step is complete when the full SHA, successful results, generated flow keys and playback findings are known. Report failed or uninspected recordings as blockers.
+
+## 4. Write the PR evidence section
+
+Preserve the rest of the PR description. Use one scenario per line:
 
 ```markdown
 ## Browser evidence
 
-Browser videos: tests/Browser/BookingTest.php, tests/Browser/CheckoutTest.php
+Browser videos: tests/Browser/BookingTest.php::it confirms an accepted booking
+Browser videos: tests/Browser/CheckoutTest.php::it shows why a card was declined
 
 Browser review:
-1. `bookingtest-it-confirms-an-accepted-booking`: `BookingController::accept` now confirms straight away. Watch the badge change to Confirmed after Accept.
-2. `checkouttest-it-shows-why-a-card-was-declined`: New decline message from `CardErrors`. Check the text under the card field.
+1. `bookingtest-it-confirms-an-accepted-booking`: Shows the booking badge changing to Confirmed after acceptance.
+2. `checkouttest-it-shows-why-a-card-was-declined`: Shows the new decline explanation beneath the card field.
 
-Recorded locally at `abc1234`: 2 passed, both videos watched.
+Recorded at `<full commit SHA>`: 2 passed; both videos watched at normal speed.
 
-Not shown: the confirmation email has no browser surface. `tests/Feature/BookingAcceptedMailTest.php` covers it.
+Not shown: the confirmation email has no browser interaction. `tests/Feature/BookingAcceptedMailTest.php` covers it.
 ```
 
-- `Browser videos:` is one line, at the start of a line, listing test files separated by commas. The selector returns only matching paths listed here, deduplicated. It never adds changed browser test files. Include changed and unchanged files only when their journeys prove this diff. Use `select@v0.2.0` or later; `v0.1.0` adds changed files automatically.
-- `Browser review:` lists videos in the order to watch them, one per line: `` N. `flow-key`: reason ``. Each reason says which change the video proves and where to look, in under 1000 characters. Diff Stage sends the reason and order with the upload and leads the PR comment with them. It skips items whose flow key wasn't recorded and logs a warning.
-- Put omitted journeys and anything you couldn't show under "Not shown", with the reason or separate test coverage. Don't describe evidence you didn't produce. When selection is empty, omit the `Browser review:` list too.
+### Selection and notes
 
-## 5. Check CI evidence matches the head
+- `Browser videos:` selects execution and recording. A file-only line selects every test in that file. Choose either whole-file or scenario selection for each file.
+- Pass `select.outputs.selection` as JSON to `diff-stage-record`. `select.outputs.tests` contains paths only and loses scenario selection. The selector includes matching explicit paths, deduplicated; changed files are candidates for inspection, not automatic selections.
+- `Browser review:` adds notes and their order in the PR comment. Use the actual flow key and a reason under 1000 characters. The publisher warns and skips notes for unrecorded keys. Notes leave execution, recording and player grouping unchanged.
+- With empty selection, omit review notes and explain the independent checks. Describe only the evidence produced and inspected.
 
-Editing the description re-runs the workflow when it listens for `edited`. With no selection, confirm CI skipped recording and publication. An older comment may remain; don't describe it as evidence for the current selection.
+This step is complete when the description names the exact scenarios, matches the generated flow keys, and states any omissions or review blockers.
 
-After a selected recording run finishes, the Diff Stage comment's heading names the commit: `Browser test videos for abc1234`. Confirm it matches `git rev-parse HEAD | cut -c1-7` and that each reviewed video appears under "What to check" and in the player's "Review first" group. If the recording failed, the comment is missing, or it names an older commit, say so in your handoff. Don't describe the evidence as current until it is.
+## 5. Verify CI evidence
+
+Editing the description starts a new evidence run when the workflow listens for `edited`, and may cancel an older run. Check the latest run for the current head.
+
+With empty selection, confirm recording and publication were skipped. Treat any older evidence comment as historical.
+
+With selected scenarios, check successful recording and publication, open the Diff Stage comment's player link, and compare its full SHA with the PR head and artifact's `sha.txt`. Confirm all selected videos and their notes are present. Watch the CI footage at normal speed and verify hosted playback through the final outcome. Private evidence may require a team member to sign in.
+
+This step is complete when hosted footage matches the current head and plays correctly, or the handoff identifies the exact failed check, missing upload, stale SHA, authentication requirement or pending playback review. Follow the project's draft and review rules.
