@@ -50,7 +50,7 @@ File-only selection runs every browser test in the file. To run individual scena
 ```
 
 ```bash
-./vendor/bin/diff-stage-record selection.json --record-videos-fast
+php vendor/diff-stage/recorder/bin/diff-stage-record selection.json --record-videos-fast
 ```
 
 Use the complete Pest name, including `it` for `it()` tests and any describe groups. Names are literal, not regexes. A selected data-driven test runs all its dataset variants. Missing files or names fail before any recording starts. Use `"test": null` to select a whole file. Do not combine whole-file and scenario selection for the same file.
@@ -141,7 +141,7 @@ jobs:
           rm -rf tests/Browser/Videos
           printf '%s\n' "$SELECTION" > .diff-stage-selection.json
           # Run this inside your existing test container when using Docker.
-          ./vendor/bin/diff-stage-record .diff-stage-selection.json --record-videos-fast
+          php vendor/diff-stage/recorder/bin/diff-stage-record .diff-stage-selection.json --record-videos-fast
           git rev-parse HEAD > tests/Browser/Videos/sha.txt
 
       - if: steps.select.outputs.tests != ''
