@@ -20,6 +20,9 @@ final class Telemetry
     /** @var list<array{at: float, screenshot: string}> */
     private static array $holds = [];
 
+    /** @var array{at: float, screenshot: string}|null */
+    private static ?array $final = null;
+
     private static ?float $startedAt = null;
 
     /**
@@ -60,6 +63,7 @@ final class Telemetry
     {
         self::$cursor = [];
         self::$holds = [];
+        self::$final = null;
         self::$startedAt = microtime(true);
         self::$steps = [];
         self::$problems = [];
@@ -219,7 +223,7 @@ final class Telemetry
         $result = ['steps' => self::$steps, 'problems' => self::$problems, 'assertions' => self::$assertions];
 
         if (Recorder::fast()) {
-            $result += ['capture_version' => 1, 'cursor' => self::$cursor, 'holds' => self::$holds];
+            $result += ['capture_version' => 1, 'cursor' => self::$cursor, 'holds' => self::$holds, 'final' => self::$final];
         }
 
         self::$startedAt = null;
@@ -382,6 +386,11 @@ final class Telemetry
     public static function hold(string $screenshot): void
     {
         self::$holds[] = ['at' => self::now(), 'screenshot' => $screenshot];
+    }
+
+    public static function finalFrame(string $screenshot): void
+    {
+        self::$final = ['at' => self::now(), 'screenshot' => $screenshot];
     }
 
     private static function now(): float

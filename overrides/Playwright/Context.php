@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pest\Browser\Playwright;
 
 use Exception;
+use DiffStage\Recorder\Cursor;
 use DiffStage\Recorder\Recorder;
 use DiffStage\Recorder\Telemetry;
 
@@ -92,6 +93,14 @@ final class Context
     {
         if ($this->browser->isClosed() || $this->closed) {
             return;
+        }
+
+        if ($this->videoPath !== null) {
+            try {
+                Cursor::finalFrame();
+            } catch (Exception) {
+                // A page that is navigating or already gone keeps the footage it has.
+            }
         }
 
         try {
