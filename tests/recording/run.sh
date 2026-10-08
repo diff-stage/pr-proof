@@ -32,6 +32,7 @@ foreach ($files as $file) {
     }
     $captionData = array_intersect_key($data, array_flip(["steps", "assertions", "problems"]));
     if (isset($data["capture_version"]) && $data["capture_version"] !== 1) throw new RuntimeException("Unsupported fast capture version");
+    if (isset($data["capture_version"]) && strlen($data["final"]["screenshot"] ?? "") < 100) throw new RuntimeException("Fast capture omitted its final frame");
     $text = json_encode($captionData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (str_contains($text, "query-secret") || str_contains($text, "Compatibility verified") || str_contains($text, "Disposable private message")) throw new RuntimeException("Telemetry kept a typed or query value");
     if (! str_contains($text, "Opened /?token=…")) throw new RuntimeException("Missing redacted steps");

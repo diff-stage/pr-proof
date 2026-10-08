@@ -155,6 +155,29 @@ final class Cursor
     }
 
     /**
+     * Waits for the last page state to paint before the context closes, so the video ends on the outcome.
+     * Fast capture also keeps a screenshot of it.
+     */
+    public static function finalFrame(): void
+    {
+        $frame = array_search(self::$currentPage, self::$pages, true);
+        if (! Telemetry::active() || $frame === false) {
+            return;
+        }
+
+        self::request(Client::instance(), $frame, 'evaluateExpression', [
+            'expression' => '() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
+            'isFunction' => true, 'arg' => ['value' => ['v' => 'undefined'], 'handles' => []],
+        ]);
+
+        if (Recorder::fast()) {
+            Telemetry::finalFrame(self::request(Client::instance(), self::$currentPage, 'screenshot', ['type' => 'png', 'fullPage' => false, 'scale' => 'css'])['binary']);
+        } else {
+            usleep(Recorder::pause() * 1000);
+        }
+    }
+
+    /**
      * @param  array<string, mixed>  $params
      * @return array<string, mixed>
      */
