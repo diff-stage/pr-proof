@@ -107,10 +107,7 @@ if [[ "$fast" == true ]]; then
   echo "Recordings queued for server processing: $run_url"
 fi
 
-previews=''
-links=''
-reviewed=''
-preview_count=0
+cards=''
 for name in "${names[@]}"; do
   video="$VIDEOS/$name.webm"
   title=$(jq -r --arg f "$name.webm" '.[$f] // empty' "$VIDEOS/titles.json" 2>/dev/null || true)
@@ -151,15 +148,19 @@ for name in "${names[@]}"; do
   video_url=$(jq -r '.url | @html' <<< "$uploaded")
   poster_url=$(jq -r '.poster_url | @html' <<< "$uploaded")
   escaped_title=$(jq -nr --arg title "$title" '$title | @html')
-  if [[ -n "$entry" ]]; then
-    reviewed+=$(printf '<li><a href="%s">%s</a>: %s</li>' "$video_url" "$escaped_title" "$(jq -r '.reason | @html' <<< "$entry")")
-  fi
-  if (( preview_count < 3 )) && [[ $(jq '.poster_public != false' <<< "$uploaded") == true ]]; then
-    previews+=$(printf '<td><a href="%s"><img src="%s" height="120" alt="%s"></a></td>' \
+  cards+=$(printf '<h4>%s</h4>\n' "$escaped_title")
+  cards+=$'\n\n'
+  if [[ $(jq '.poster_public != false' <<< "$uploaded") == true ]]; then
+    cards+=$(printf '<p><a href="%s"><img src="%s" width="640" alt="%s"></a></p>\n' \
       "$video_url" "$poster_url" "$escaped_title")
-    preview_count=$(( preview_count + 1 ))
+    cards+=$'\n\n'
   fi
-  links+=$(printf '<li><a href="%s">%s</a></li>' "$video_url" "$escaped_title")
+  if [[ -n "$entry" ]]; then
+    cards+=$(printf '<p>%s</p>\n' "$(jq -r '.reason | @html' <<< "$entry")")
+    cards+=$'\n\n'
+  fi
+  cards+=$(printf '<p><a href="%s">Watch video on Diff Stage</a></p>\n' "$video_url")
+  cards+=$'\n\n'
 done
 
 if [[ "$fast" == false ]]; then
@@ -185,22 +186,7 @@ trap 'rm -f "$body"' EXIT
     echo 'Recordings are processing on Diff Stage and will appear here when ready.'
   fi
   echo
-  if [[ -n "$previews" ]]; then
-    echo "<table><tr>$previews</tr></table>"
-    echo
-  fi
-  if [[ -n "$reviewed" ]]; then
-    echo '**What to check**'
-    echo
-    echo "<ol>$reviewed</ol>"
-    echo
-  fi
-  echo '<details>'
-  echo "<summary>All browser tests (${#videos[@]})</summary>"
-  echo
-  echo "<ol>$links</ol>"
-  echo
-  echo '</details>'
+  printf '%s' "$cards"
 } > "$body"
 
 existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \

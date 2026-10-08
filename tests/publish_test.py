@@ -428,7 +428,7 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
                 self.assertIn('api -X PATCH repos/owner/repo/issues/comments/7', log)
                 self.assertNotIn('pr comment', log)
 
-    def test_comment_limits_previews_and_preserves_titles_as_text(self):
+    def test_comment_previews_every_video_and_preserves_titles_as_text(self):
         titles = {
             f'{name}.webm': f'{name} with dataset "mobile" & <script> [example] | \'quoted\''
             for name in ('booking', 'checkout', 'login', 'settings', 'signup')
@@ -441,12 +441,12 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         body = (self.path / 'comment.md').read_text()
         self.assertTrue(body.startswith('<!-- diff-stage -->'))
         self.assertIn('Watch all 5 on Diff Stage', body)
-        self.assertIn('<summary>All browser tests (5)</summary>', body)
+        self.assertNotIn('<table>', body)
         comment = self.comment()
-        self.assertEqual(len(comment.images), 3)
-        self.assertEqual(len(comment.links), 8)
+        self.assertEqual(len(comment.images), 5)
+        self.assertEqual(len(comment.links), 10)
         for image, title in zip(comment.images, titles.values()):
-            self.assertEqual(image, {'src': 'http://poster', 'height': '120', 'alt': title})
+            self.assertEqual(image, {'src': 'http://poster', 'width': '640', 'alt': title})
         for title in titles.values():
             self.assertIn(title, comment.text)
         self.assertNotIn('What to check', body)
@@ -475,8 +475,10 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         self.assertEqual(form_field(booking, 'review_order'), '3')
         comment = self.comment()
         text = ''.join(comment.text)
-        self.assertIn('What to check', text)
-        self.assertIn('checkout: ' + reason, text)
+        self.assertIn(reason, comment.text)
+        self.assertLess(text.index('checkout'), text.index(reason))
+        self.assertLess(text.index(reason), text.index('booking'))
+        self.assertIn('Watch video on Diff Stage', text)
         self.assertEqual([image['alt'] for image in comment.images], ['checkout', 'booking'])
         self.assertNotIn('ignored', text)
 
