@@ -6,11 +6,10 @@ Reviewers see each changed flow working without checking out the branch. Fast ca
 
 ## Install
 
-The Diff Stage recorder isn't on Packagist yet, so add its GitHub repository before requiring it:
+Install the recorder with Composer:
 
 ```bash
-composer config repositories.diff-stage vcs https://github.com/diff-stage/recorder
-composer require --dev diff-stage/recorder:dev-main -W
+composer require --dev diff-stage/recorder:^0.2 -W
 ```
 
 `-W` lets Composer change PHPUnit to a version Pest supports. A fresh Laravel app needs it.

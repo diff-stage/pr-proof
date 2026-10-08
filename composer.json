@@ -1,6 +1,7 @@
 {
     "name": "diff-stage/recorder",
     "description": "Readable videos of Pest browser tests, posted on your pull requests.",
+    "keywords": ["laravel", "pest", "browser-testing", "ci"],
     "type": "library",
     "license": "MIT",
     "require": {
