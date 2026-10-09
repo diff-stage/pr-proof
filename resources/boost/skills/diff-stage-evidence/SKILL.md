@@ -9,7 +9,7 @@ Diff Stage records the browser tests you name and posts the videos on the pull r
 
 ## 1. Choose the journeys that prove the change
 
-Read the diff. For each browser-visible change, pick the smallest existing Pest browser test that shows it, including unchanged tests that reach the changed behavior. When none does, add or adjust one: one journey per test, disposable data, a readiness assertion for asynchronous behavior and a visible final outcome. The recording shows typed and rendered data, so keep secrets and personal data out of fixtures.
+Read the diff. For each browser-visible change, pick the smallest existing Pest browser test that shows it, including unchanged tests that reach the changed behavior. When none does, add or adjust one with the `pest-browser-testing` skill: one journey per test, disposable data, a readiness assertion for asynchronous behavior and a visible final outcome. The recording shows typed and rendered data, so keep secrets and personal data out of fixtures.
 
 Name only tests that prove the diff. If nothing has a useful browser demonstration, name nothing and say which checks cover the change instead.
 

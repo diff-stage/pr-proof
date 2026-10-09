@@ -204,7 +204,12 @@ Notes over 1000 characters are cut, and names without a matching video are skipp
 
 ## Prepare evidence with an agent
 
-The recorder ships a `diff-stage-evidence` skill and a short guideline for [Laravel Boost](https://github.com/laravel/boost). After installing the recorder, run:
+The recorder ships two skills and a short guideline for [Laravel Boost](https://github.com/laravel/boost):
+
+- `diff-stage-evidence` names the tests that prove a change.
+- [`pest-browser-testing`](https://github.com/diff-stage/pest-browser-testing) teaches agents to write and fix browser tests that fail only when the feature breaks.
+
+After installing the recorder, run:
 
 ```bash
 php artisan boost:update
@@ -212,10 +217,10 @@ php artisan boost:update
 
 Boost offers the new package. Accept it, and every agent Boost manages learns to name the tests that prove its change and explain what to watch, without being asked. The first time an agent names a test, your browser asks you to approve the sign-in.
 
-Without Boost, copy the skill into your agent's skills folder, for example `.claude/skills` or `.agents/skills`:
+Without Boost, copy the skills into your agent's skills folder, for example `.claude/skills` or `.agents/skills`:
 
 ```bash
-cp -r vendor/diff-stage/recorder/resources/boost/skills/diff-stage-evidence .claude/skills/
+cp -r vendor/diff-stage/recorder/resources/boost/skills/* .claude/skills/
 ```
 
 ## Record approved baselines
