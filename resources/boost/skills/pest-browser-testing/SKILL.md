@@ -17,12 +17,12 @@ For a quick one-off "does this work?" check, use `pest --agent` if the project h
 
 ## 1. Read the setup
 
-1. Read the existing browser CI first, including its Docker image and services. Run `composer show pestphp/pest-plugin-browser` and `npx --no-install playwright --version` in that environment, then find your row. Keep the Playwright version the tests already pass with. The versions below are setup and debugging notes, not a reason to change a green project. If Diff Stage is installed, check which Browser versions the recorder supports before changing the plugin. Do not edit bundled skills to invent a required pairing.
+1. Run `composer show pestphp/pest-plugin-browser` and `npx --no-install playwright --version`, then find your row. If the browser tests already pass, keep their Playwright version:
 
-   | Plugin | Playwright notes | Plan around |
+   | Plugin | Playwright | Plan around |
    |---|---|---|
-   | 4.x, 5.0.0 | `1.61.1` is a tested version | Newer Playwright makes a missing selector hang. No `--trace`. |
-   | 5.0.1 – 5.0.x | 1.62.1+ | Older click handling. No `--trace`. |
+   | 4.x, 5.0.0 | up to `1.61.1` | Newer Playwright makes a missing selector hang. No `--trace`. |
+   | 5.0.1 – 5.0.x | 1.62.1+ | Upgrade to 5.1. No `--trace`. |
    | 5.1+ | 1.62.1+ (1.63+ from 5.1.1) | Clicks run once with the full timeout. `--trace` available. |
 
    On anything below 5.1, clicks also retry in 1s attempts: see [references/api-traps.md](references/api-traps.md).
