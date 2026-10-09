@@ -14,7 +14,9 @@ composer require --dev diff-stage/recorder:^0.3 -W
 
 `-W` lets Composer change PHPUnit to a version Pest supports. A fresh Laravel app needs it.
 
-Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. The recorder replaces four internal Browser classes while recording and rejects every other Browser version. Install the Playwright version required by your installed Browser package.
+Supports Pest 4 with Browser 4.3.1, and Pest 5 with Browser 5.1.2. Browser 5 requires PHP 8.4+ and the sockets extension. The recorder replaces four internal Browser classes while recording and rejects every other Browser version.
+
+Keep the Playwright version your browser tests already pass with. If Playwright is missing, tested pairings are Browser 4.3.1 with Playwright 1.59.1, and Browser 5.1.2 with Playwright 1.63.0.
 
 ## Record locally
 
