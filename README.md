@@ -110,7 +110,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: diff-stage/recorder/preflight@main
+      - uses: diff-stage/recorder/preflight@e64fd614186b28827b8400e27c83aa4f85649745
 
   record:
     needs: preflight
@@ -128,7 +128,7 @@ jobs:
           persist-credentials: false
 
       - id: select
-        uses: diff-stage/recorder/select@main
+        uses: diff-stage/recorder/select@e64fd614186b28827b8400e27c83aa4f85649745
 
       # Reuse your existing Docker/browser CI setup here.
       # Gate expensive setup on steps.select.outputs.tests != ''.
@@ -165,7 +165,7 @@ jobs:
           name: browser-videos-${{ github.event.pull_request.head.sha }}
           path: tests/Browser/Videos
 
-      - uses: diff-stage/recorder/publish@v0.2.1
+      - uses: diff-stage/recorder/publish@e64fd614186b28827b8400e27c83aa4f85649745
 ```
 
 The jobs keep PR code away from publishing rights:
@@ -176,13 +176,11 @@ The jobs keep PR code away from publishing rights:
 - The publisher refuses to upload if `sha.txt` names a different commit from the PR head.
 - Fork PRs still record, and their videos stay as workflow artifacts. They can't publish through the App. Never use `pull_request_target` to run PR code.
 
-Scenario selection and preflight require a commit containing this change. Pin a reviewed full commit SHA for `select`, `preflight` and the Composer package before using them in production. The `v0.1.0` selector adds changed files automatically, so use `v0.2.0` or later.
+The examples pin `select`, `preflight` and `publish` to one reviewed commit. Update all three pins together when you upgrade the Composer package.
 
 Keep your existing regression jobs independent of this workflow. Empty evidence selection must not skip regression tests or turn them into reviewer videos.
 
-The publisher defaults to `https://diffstage.com`. Set `url` to override the endpoint for a self-hosted service. An explicit `api-token` takes precedence over GitHub identity for services that support project tokens. The hosted service requires a GitHub App connection and GitHub Actions identity.
-
-Existing workflow pins keep their original default until you update them to a commit containing this change. To use the new domain with an older publisher, add `url: https://diffstage.com` under its `with` inputs. Replace any explicit Cloud hostname override too. The publisher uses the run, video and poster URLs returned by the service in its PR comment.
+The publisher uploads to `https://diffstage.com` using GitHub Actions identity, so the repository must be connected through the Diff Stage GitHub App. The PR comment links to the run, videos and posters returned by the service.
 
 `select` returns a `selection` JSON output for the runner and a `tests` file list for gating setup. Add one line per scenario in the PR description:
 
@@ -251,7 +249,7 @@ jobs:
       - id: record
         run: ./vendor/bin/pest tests/Browser --record-videos
       - if: success() && steps.record.outcome == 'success'
-        uses: diff-stage/recorder/publish@v0.2.1
+        uses: diff-stage/recorder/publish@e64fd614186b28827b8400e27c83aa4f85649745
         with:
           mode: baseline
 ```
