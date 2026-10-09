@@ -113,7 +113,7 @@ jobs:
       selection: ${{ steps.preflight.outputs.selection }}
     steps:
       - id: preflight
-        uses: diff-stage/recorder/preflight@v0.3.0
+        uses: diff-stage/recorder/preflight@8f500d53c4fec4783c34c9f2f4eaa48ce55c1951
 
   record:
     needs: preflight
@@ -158,7 +158,7 @@ jobs:
           name: browser-videos-${{ github.event.pull_request.head.sha }}
           path: tests/Browser/Videos
 
-      - uses: diff-stage/recorder/publish@v0.3.0
+      - uses: diff-stage/recorder/publish@8f500d53c4fec4783c34c9f2f4eaa48ce55c1951
         with:
           selection: ${{ needs.preflight.outputs.selection }}
 ```
@@ -240,7 +240,7 @@ jobs:
       - id: record
         run: ./vendor/bin/pest tests/Browser --record-videos
       - if: success() && steps.record.outcome == 'success'
-        uses: diff-stage/recorder/publish@v0.3.0
+        uses: diff-stage/recorder/publish@8f500d53c4fec4783c34c9f2f4eaa48ce55c1951
         with:
           mode: baseline
 ```
