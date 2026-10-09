@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Copy the pest-browser-testing skill from its own repo, which is the source of truth.
+# Usage: scripts/sync-pest-browser-testing [ref]
+set -euo pipefail
+
+ref="${1:-main}"
+target="$(cd "$(dirname "$0")/.." && pwd)/resources/boost/skills/pest-browser-testing"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+curl -fsSL "https://github.com/diff-stage/pest-browser-testing/archive/${ref}.tar.gz" | tar -xz -C "$work" --strip-components=1
+rm -rf "$target"
+cp -R "$work/skills/pest-browser-testing" "$target"
