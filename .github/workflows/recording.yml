@@ -4,13 +4,13 @@ permissions:
   contents: read
 jobs:
   publisher:
-    runs-on: [self-hosted, linux, x64, recorder-local]
+    runs-on: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","recorder-local"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: python3 -m unittest discover -s tests -p '*_test.py'
   record:
-    runs-on: [self-hosted, linux, x64, recorder-local]
+    runs-on: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","recorder-local"]') || 'ubuntu-latest' }}
     strategy:
       matrix:
         include:
