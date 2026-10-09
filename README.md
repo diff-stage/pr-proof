@@ -86,7 +86,7 @@ Next to each video, the recorder writes a `.json` file with what happened during
 
 Reuse the same test environment on your default branch and record the same files or scenarios. You can pass a checked-in JSON selection to `diff-stage-record` for baselines, or record whole files there. Scenario selection does not change flow keys.
 
-The service compares PR videos with the latest completed default-branch recording of the same flow. It shows baseline and PR videos side by side with paired playback controls, ordered actions and new or fixed browser problems. Without an approved recording to compare against, the service labels the PR video instead. "Baseline unavailable" means the project has no approved baseline yet. "No matching baseline" means no approved recording has this flow key. Neither label means the flow is new. The baseline may not be recorded yet, or the test may have been renamed.
+The service compares PR videos with the latest completed default-branch recording of the same flow. It shows baseline and PR videos side by side with paired playback controls, ordered actions and new or fixed browser problems. Without an approved recording to compare against, the service labels the PR video instead. "No approved baseline yet" means the project has no approved baseline. "No matching baseline" means no approved recording has this flow key. Neither label means the flow is new. The baseline may not be recorded yet, or the test may have been renamed.
 
 Each flow key is the recording filename without `.webm`. Renaming a test changes its filename and flow key, so it no longer matches its old baseline. Keep the same recording workflow for baseline uploads: its GitHub `run_number` orders approvals so a slower, older run cannot replace a newer baseline.
 
