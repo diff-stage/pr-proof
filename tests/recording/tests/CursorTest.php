@@ -41,6 +41,16 @@ it('moves the pointer visibly before clicking a scrolled control', function () {
     }
 });
 
+it('acts through the page straight after opening it', function () {
+    $page = visit(getenv('DIFF_STAGE_TEST_URL').'/?token=query-secret');
+    $page->page()->getByRole('textbox', ['name' => 'Message'])->fill('Compatibility verified');
+
+    $page->keys('message', ['7'])
+        ->click('Save message')
+        ->assertSeeIn('#result', 'Compatibility verified')
+        ->assertNoJavaScriptErrors();
+});
+
 it('opens a menu through real pointer movement', function () {
     $page = visit(getenv('DIFF_STAGE_TEST_URL').'/?token=query-secret');
     $page->script(<<<'JS'
