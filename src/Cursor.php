@@ -178,17 +178,16 @@ final class Cursor
     }
 
     /**
+     * Pest Browser stops reading goto at its load event, so goto's response can arrive first.
+     * Only the final message answers this request.
+     *
      * @param  array<string, mixed>  $params
      * @return array<string, mixed>
      */
     private static function request(Client $client, string $guid, string $method, array $params = []): array
     {
-        foreach ($client->execute($guid, $method, $params) as $message) {
-            if (isset($message['result'])) {
-                return $message['result'];
-            }
-        }
+        $messages = iterator_to_array($client->execute($guid, $method, $params), false);
 
-        return [];
+        return end($messages)['result'] ?? [];
     }
 }
