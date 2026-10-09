@@ -13,6 +13,8 @@ inputs:
   url:
     description: Diff Stage service URL.
     default: https://diffstage.com
+  selection:
+    description: The preflight action's selection output, for reviewer notes.
   token:
     description: Token that can comment on the pull request.
     default: ${{ github.token }}
@@ -33,9 +35,9 @@ runs:
         DIFF_STAGE_TOKEN: ${{ inputs.api-token }}
         DIFF_STAGE_URL: ${{ inputs.url }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
-        PR_BODY: ${{ github.event.pull_request.body }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         HEAD_REF: ${{ github.event.pull_request.head.ref }}
         VIDEOS: ${{ inputs.videos }}
         COMPRESS: ${{ github.action_path }}/../bin/diff-stage-compress
+        SELECTION: ${{ inputs.selection }}
       run: bash "${{ github.action_path }}/publish.sh"

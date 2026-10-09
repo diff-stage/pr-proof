@@ -1,3 +1,5 @@
+const fs = require('node:fs');
+
 async function preflight() {
     const service = new URL(process.env.DIFF_STAGE_URL);
     if (service.protocol !== 'https:' || service.username || service.password) {
@@ -24,6 +26,15 @@ async function preflight() {
         const body = await response.json().catch(() => ({}));
         throw new Error(`Diff Stage preflight failed (${response.status}): ${body.message || 'Check the repository GitHub App connection and team plan in Diff Stage.'}`);
     }
-    console.log('Diff Stage repository access confirmed. Ready to record.');
+    const {selection = []} = await response.json();
+    const tests = [...new Set(selection.map(entry => entry.file))].sort();
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, `tests=${tests.join(',')}\nselection=${JSON.stringify(selection)}\n`);
+    if (process.env.GITHUB_EVENT_NAME !== 'pull_request') {
+        console.log('Diff Stage repository access confirmed. Ready to record.');
+    } else if (tests.length) {
+        console.log(`Diff Stage repository access confirmed. Recording the browser tests named for this branch: ${tests.join(', ')}`);
+    } else {
+        console.log('Diff Stage repository access confirmed. No browser tests are named for this branch, so there is nothing to record. Name one with vendor/bin/diff-stage-show.');
+    }
 }
 preflight().catch(error => { console.error(error.message); process.exitCode = 1; });

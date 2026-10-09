@@ -9,7 +9,7 @@ Reviewers see each changed flow working without checking out the branch. Fast ca
 Install the recorder with Composer:
 
 ```bash
-composer require --dev diff-stage/recorder:^0.2 -W
+composer require --dev diff-stage/recorder:^0.3 -W
 ```
 
 `-W` lets Composer change PHPUnit to a version Pest supports. A fresh Laravel app needs it.
@@ -97,7 +97,6 @@ Install the Diff Stage GitHub App and connect your repositories at [diffstage.co
 ```yaml
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -109,33 +108,29 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      tests: ${{ steps.preflight.outputs.tests }}
+      selection: ${{ steps.preflight.outputs.selection }}
     steps:
-      - uses: diff-stage/recorder/preflight@e64fd614186b28827b8400e27c83aa4f85649745
+      - id: preflight
+        uses: diff-stage/recorder/preflight@8f500d53c4fec4783c34c9f2f4eaa48ce55c1951
 
   record:
     needs: preflight
-    if: always() && (needs.preflight.result == 'success' || needs.preflight.result == 'skipped')
+    if: needs.preflight.outputs.tests != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-    outputs:
-      tests: ${{ steps.select.outputs.tests }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
-      - id: select
-        uses: diff-stage/recorder/select@e64fd614186b28827b8400e27c83aa4f85649745
-
       # Reuse your existing Docker/browser CI setup here.
-      # Gate expensive setup on steps.select.outputs.tests != ''.
 
-      - if: steps.select.outputs.tests != ''
-        env:
-          SELECTION: ${{ steps.select.outputs.selection }}
+      - env:
+          SELECTION: ${{ needs.preflight.outputs.selection }}
         run: |
           rm -rf tests/Browser/Videos
           printf '%s\n' "$SELECTION" > .diff-stage-selection.json
@@ -143,8 +138,7 @@ jobs:
           php vendor/diff-stage/recorder/bin/diff-stage-record .diff-stage-selection.json --record-videos-fast
           git rev-parse HEAD > tests/Browser/Videos/sha.txt
 
-      - if: steps.select.outputs.tests != ''
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: browser-videos-${{ github.event.pull_request.head.sha }}
           path: tests/Browser/Videos
@@ -152,8 +146,7 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: record
-    if: needs.record.outputs.tests != '' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [preflight, record]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -165,67 +158,65 @@ jobs:
           name: browser-videos-${{ github.event.pull_request.head.sha }}
           path: tests/Browser/Videos
 
-      - uses: diff-stage/recorder/publish@e64fd614186b28827b8400e27c83aa4f85649745
+      - uses: diff-stage/recorder/publish@8f500d53c4fec4783c34c9f2f4eaa48ce55c1951
+        with:
+          selection: ${{ needs.preflight.outputs.selection }}
 ```
 
 The jobs keep PR code away from publishing rights:
 
-- `preflight` runs before app preparation, without checking out repository code. It requests GitHub identity and checks the App connection, current run and team plan. A failure stops the recording job. Fork and Dependabot PRs skip preflight and keep artifact-only recordings.
+- `preflight` runs before app preparation, without checking out repository code. It requests GitHub identity, checks the App connection, current run and team plan, and returns the browser tests named for the branch. With nothing named, recording and publishing are skipped. Fork and Dependabot PRs skip preflight, so they aren't recorded.
 - `record` checks out the PR's head commit, so the videos show the code the PR adds rather than GitHub's merge preview. It runs that code with a read-only token and no stored credentials.
 - `publish` never runs PR code. It downloads the recordings and uploads them. It needs `id-token: write` to request GitHub identity and `pull-requests: write` to post its comment.
 - The publisher refuses to upload if `sha.txt` names a different commit from the PR head.
-- Fork PRs still record, and their videos stay as workflow artifacts. They can't publish through the App. Never use `pull_request_target` to run PR code.
+- Never use `pull_request_target` to run PR code.
 
-The examples pin `select`, `preflight` and `publish` to one reviewed commit. Update all three pins together when you upgrade the Composer package.
+The examples pin `preflight` and `publish` to one reviewed commit. Update both pins together when you upgrade the Composer package.
 
 Keep your existing regression jobs independent of this workflow. Empty evidence selection must not skip regression tests or turn them into reviewer videos.
 
 The publisher uploads to `https://diffstage.com` using GitHub Actions identity, so the repository must be connected through the Diff Stage GitHub App. The PR comment links to the run, videos and posters returned by the service.
 
-`select` returns a `selection` JSON output for the runner and a `tests` file list for gating setup. Add one line per scenario in the PR description:
+## Choose what reviewers see
 
+Name each browser test that proves the change from the pull request branch:
+
+```bash
+vendor/bin/diff-stage-show "tests/Browser/BookingTest.php::it confirms an accepted booking" \
+    --why "Accepting now confirms straight away. Watch the badge change to Confirmed."
 ```
-Browser videos: tests/Browser/WizardTest.php::it saves a draft
-Browser videos: tests/Browser/WizardTest.php::it completes the wizard
-```
 
-Changed browser test files are not added automatically. Check what each file demonstrates before selecting it, including unchanged tests that reach the changed behaviour. Paths must match the action's `pattern` regex, which defaults to `^tests/Browser/.+Test\.php$`. File-only lines still accept comma-separated paths and run every test in those files. Scenario lines use `file::complete Pest name`, one per line. Selection is deduplicated. `Browser review:` only adds notes and ordering; it never limits execution or recording.
+The command asks Pest whether the test exists, then saves it and its note on Diff Stage for this repository and branch. Your commits and PR description stay untouched. The first time, it opens your browser to approve the sign-in, then carries on. If the browser can't open, follow the printed link.
 
-If no journey meaningfully demonstrates the diff, leave `Browser videos:` empty or omit it. The selector outputs an empty `tests` value and logs that recording is skipped. The workflow above then skips recording and publication. List omitted journeys and their reasons in the PR description. Never substitute an unrelated smoke journey. A previous video comment may remain, so check its SHA before treating it as current evidence.
+On each push, `preflight` reads the branch's named tests and returns a `selection` JSON output for the runner, plus a `tests` file list for gating the record job. `publish` turns each note into what the PR comment says about that test's videos.
+
+- Use the complete Pest name, including `it` and describe groups. Every dataset variant is recorded and shares the note.
+- Name only a file path to record every test in it. Naming the whole file replaces its single tests, and the other way round.
+- Run the command again to change a note. Run it with no arguments to list what the branch shows, or with `--clear` to show nothing.
+- Name tests before pushing. Tests named after your latest push are recorded on the next one, or when you re-run the workflow.
+- `vendor/bin/diff-stage-show logout` signs the computer out.
+
+Changed browser test files are not added automatically. Check what each test demonstrates before naming it, including unchanged tests that reach the changed behavior. If no journey meaningfully demonstrates the diff, name nothing: preflight outputs an empty `tests` value and the workflow above skips recording and publication. Never substitute an unrelated smoke journey. A previous video comment may remain, so check its SHA before treating it as current evidence.
+
+Notes over 1000 characters are cut, and names without a matching video are skipped with a warning. Baseline runs ignore the selection.
 
 `publish` uploads each video to the Diff Stage service and keeps one comment on the PR up to date. The comment links to a page where every video plays with normal controls. It shows a still from the first three videos when the service says the still is public. Projects with protected private evidence get links only. PR runs are kept for 30 days. Current approved videos and baselines referenced by retained PR runs survive pruning.
 
-## Tell reviewers what to watch
-
-Add a `Browser review:` list to the PR description to order the videos and say what each one proves:
-
-```markdown
-Browser review:
-1. `bookingtest-it-confirms-an-accepted-booking`: Accepting now confirms straight away. Watch the badge change to Confirmed.
-2. `checkouttest-it-shows-why-a-card-was-declined`: Check the new message under the card field.
-```
-
-Each item is a number, the flow key in backticks, a colon or dash, and the reason. The list ends at the first line that isn't an item or blank. `publish` uploads these videos first, in list order, and the comment opens with a "What to check" list. Reasons over 1000 characters are cut. Flow keys without a matching video are skipped with a warning. Baseline runs ignore the list.
-
-The list renders as plain Markdown, so reviewers can read it in the description too.
-
 ## Prepare evidence with an agent
 
-`skills/diff-stage-evidence` is an agent skill for Claude Code, Codex and other tools that read `SKILL.md` skills. While preparing a PR, the agent reads the diff and your browser tests, picks the smallest journeys that show the change, adds tests where none exist, records them at the current commit and writes the `Browser videos:` and `Browser review:` lines. It lists omitted journeys and their reasons. It never blindly selects all changed browser tests, and leaves selection empty when none prove the diff.
-
-The skill is one Markdown file. Read it before installing, then copy it into your project:
+The recorder ships a `diff-stage-evidence` skill and a short guideline for [Laravel Boost](https://github.com/laravel/boost). After installing the recorder, run:
 
 ```bash
-# Claude Code
-mkdir -p .claude/skills
-cp -r vendor/diff-stage/recorder/skills/diff-stage-evidence .claude/skills/
-
-# Codex
-mkdir -p .agents/skills
-cp -r vendor/diff-stage/recorder/skills/diff-stage-evidence .agents/skills/
+php artisan boost:update
 ```
 
-Copy it to `~/.claude/skills` or `~/.agents/skills` to use it across projects. Copy it again after upgrading the recorder.
+Boost offers the new package. Accept it, and every agent Boost manages learns to name the tests that prove its change and explain what to watch, without being asked. The first time an agent names a test, your browser asks you to approve the sign-in.
+
+Without Boost, copy the skill into your agent's skills folder, for example `.claude/skills` or `.agents/skills`:
+
+```bash
+cp -r vendor/diff-stage/recorder/resources/boost/skills/diff-stage-evidence .claude/skills/
+```
 
 ## Record approved baselines
 
@@ -249,7 +240,7 @@ jobs:
       - id: record
         run: ./vendor/bin/pest tests/Browser --record-videos
       - if: success() && steps.record.outcome == 'success'
-        uses: diff-stage/recorder/publish@e64fd614186b28827b8400e27c83aa4f85649745
+        uses: diff-stage/recorder/publish@8f500d53c4fec4783c34c9f2f4eaa48ce55c1951
         with:
           mode: baseline
 ```
@@ -258,7 +249,7 @@ jobs:
 
 The publisher creates a run with its kind, commit SHA and branch. Baselines also send `source_order` from `github.run_number`. Supported browser assertions also record one check with its start time, finish time and pass/fail outcome. The player can show checking, verified and failed captions without exposing expected field values. Text checks redact values entered earlier in the recording. Custom script assertions are not captioned.
 
-Each upload includes the filename-stem `flow_key`, MP4, JPEG poster and compressed JSON telemetry. Pull request uploads named in `Browser review:` also send `review_reason` and `review_order`. Recordings without telemetry send empty steps and problems for compatibility. It calls `/api/runs/{id}/complete` with `expected_videos` only after every upload succeeds. Failed or partial baseline runs never become approved. Completed runs are immutable.
+Each upload includes the filename-stem `flow_key`, MP4, JPEG poster and compressed JSON telemetry. Pull request uploads of a named test with a note also send `review_reason` and `review_order`. Recordings without telemetry send empty steps and problems for compatibility. It calls `/api/runs/{id}/complete` with `expected_videos` only after every upload succeeds. Failed or partial baseline runs never become approved. Completed runs are immutable.
 
 ## Licence
 

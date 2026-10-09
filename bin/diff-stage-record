@@ -3,25 +3,9 @@
 
 declare(strict_types=1);
 
-/** @param list<string> $command */
-function runSelectedTests(array $command, bool $quiet = false): int
-{
-    $process = proc_open($command, [0 => STDIN, 1 => $quiet ? ['pipe', 'w'] : STDOUT, 2 => STDERR], $pipes);
-    if ($process === false) {
-        throw new RuntimeException('Could not start Pest.');
-    }
+use DiffStage\Recorder\Scenarios;
 
-    $output = $quiet ? stream_get_contents($pipes[1]) : '';
-    if ($quiet) {
-        fclose($pipes[1]);
-    }
-    $status = proc_close($process);
-    if ($quiet && $status !== 0) {
-        fwrite(STDERR, $output);
-    }
-
-    return $status;
-}
+require_once __DIR__.'/../src/Scenarios.php';
 
 try {
     if ($argc < 2) {
@@ -43,8 +27,6 @@ try {
     $files = [];
     foreach ($selection as $entry) {
         if (! is_array($entry) || ! isset($entry['file']) || ! is_string($entry['file'])
-            || ! preg_match('#\A[a-zA-Z0-9_./-]+\.php\z#', $entry['file'])
-            || str_starts_with($entry['file'], '/') || str_contains($entry['file'], '..') || ! is_file($entry['file'])
             || ! array_key_exists('test', $entry) || ($entry['test'] !== null && (! is_string($entry['test']) || trim($entry['test']) === ''))) {
             throw new RuntimeException('Selection must contain existing relative PHP files and exact scenario names.');
         }
@@ -56,36 +38,17 @@ try {
         if (count($tests) > 1 && in_array(null, $tests, true)) {
             throw new RuntimeException('Select either the whole file or individual scenarios for '.$file.', not both.');
         }
-        $filters = [];
         foreach ($tests as $test) {
-            $filter = $test === null ? null : '/::'.preg_quote($test, '/').'(?: with data set .+)?$/u';
-            $list = tempnam(sys_get_temp_dir(), 'diff-stage-tests-');
-            try {
-                $command = [PHP_BINARY, 'vendor/bin/pest', $file];
-                if ($filter !== null) {
-                    array_push($command, '--filter', $filter);
-                    $filters[] = preg_quote($test, '/');
-                }
-                array_push($command, '--list-tests-xml', $list);
-                if (runSelectedTests($command, true) !== 0) {
-                    throw new RuntimeException('Pest could not discover tests in '.$file.'.');
-                }
-                $xml = new DOMDocument;
-                if (! $xml->load($list, LIBXML_NONET) || $xml->getElementsByTagName('testMethod')->length === 0) {
-                    throw new RuntimeException('No tests match '.$file.($test === null ? '' : '::'.$test).'. Use the complete Pest name, including "it" and describe groups.');
-                }
-            } finally {
-                unlink($list);
-            }
+            Scenarios::count($file, $test);
         }
         $command = [PHP_BINARY, 'vendor/bin/pest', $file, ...$options];
-        if ($filters !== []) {
-            array_push($command, '--filter', '/::(?:'.implode('|', $filters).')(?: with data set .+)?$/u');
+        if ($tests !== [null]) {
+            array_push($command, '--filter', Scenarios::filter($tests));
         }
         $commands[] = $command;
     }
     foreach ($commands as $command) {
-        $status = runSelectedTests($command);
+        $status = Scenarios::run($command);
         if ($status !== 0) {
             exit($status);
         }
