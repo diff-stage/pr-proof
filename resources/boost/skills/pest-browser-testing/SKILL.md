@@ -17,11 +17,11 @@ For a quick one-off "does this work?" check, use `pest --agent` if the project h
 
 ## 1. Read the setup
 
-1. Run `composer show pestphp/pest-plugin-browser` and `npx playwright --version`, then find your row:
+1. Run `composer show pestphp/pest-plugin-browser` and `npx --no-install playwright --version`, then find your row. If the browser tests already pass, keep their Playwright version:
 
    | Plugin | Playwright | Plan around |
    |---|---|---|
-   | 4.x, 5.0.0 | pin exactly `1.61.1` | Newer Playwright makes a missing selector hang. No `--trace`. |
+   | 4.x, 5.0.0 | up to `1.61.1` | Newer Playwright makes a missing selector hang. No `--trace`. |
    | 5.0.1 – 5.0.x | 1.62.1+ | Upgrade to 5.1. No `--trace`. |
    | 5.1+ | 1.62.1+ (1.63+ from 5.1.1) | Clicks run once with the full timeout. `--trace` available. |
 
