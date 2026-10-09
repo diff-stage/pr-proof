@@ -1,0 +1,285 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use DiffStage\Recorder\Scenarios;
+
+require_once __DIR__.'/../src/Scenarios.php';
+
+const USAGE = <<<'TEXT'
+Show reviewers a browser test on this branch's pull request:
+
+  vendor/bin/diff-stage-show "tests/Browser/BookingTest.php::it confirms an accepted booking" \
+      --why "Watch the badge change to Confirmed."
+
+  vendor/bin/diff-stage-show            List what this branch shows
+  vendor/bin/diff-stage-show --clear    Show nothing on this branch
+  vendor/bin/diff-stage-show logout     Sign this computer out
+TEXT;
+
+/** @param list<string> $command */
+function git(array $command): string
+{
+    $process = proc_open(['git', ...$command], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    $output = stream_get_contents($pipes[1]);
+    $error = stream_get_contents($pipes[2]);
+    if (proc_close($process) !== 0) {
+        throw new RuntimeException(trim($error) ?: 'git '.implode(' ', $command).' failed.');
+    }
+
+    return trim($output);
+}
+
+function paint(string $text, string $code): string
+{
+    return stream_isatty(STDOUT) ? "\e[{$code}m{$text}\e[0m" : $text;
+}
+
+function service(): string
+{
+    return rtrim(getenv('DIFF_STAGE_URL') ?: 'https://diffstage.com', '/');
+}
+
+function credentialsFile(): string
+{
+    return (getenv('XDG_CONFIG_HOME') ?: getenv('HOME').'/.config').'/diff-stage/credentials.json';
+}
+
+/** @return array{token: string, pending?: bool, code?: string, url?: string, interval?: int}|null */
+function credential(): ?array
+{
+    $file = credentialsFile();
+
+    return is_file($file) ? (json_decode(file_get_contents($file), true, flags: JSON_THROW_ON_ERROR)[service()] ?? null) : null;
+}
+
+/** Saves the credential for this Diff Stage URL, readable only by you. */
+function remember(?array $credential): void
+{
+    $file = credentialsFile();
+    $all = is_file($file) ? json_decode(file_get_contents($file), true, flags: JSON_THROW_ON_ERROR) : [];
+    $all[service()] = $credential;
+    $all = array_filter($all);
+    $umask = umask(0077);
+    try {
+        is_dir(dirname($file)) || mkdir(dirname($file), 0700, true);
+        file_put_contents($file, json_encode((object) $all, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n");
+        chmod($file, 0600);
+    } finally {
+        umask($umask);
+    }
+}
+
+/**
+ * @param  array<string, mixed>  $data
+ * @return array{0: int, 1: array<string, mixed>}
+ */
+function api(string $method, string $path, ?string $token = null, array $data = []): array
+{
+    $url = service().$path;
+    $headers = ['Accept: application/json', 'User-Agent: diff-stage-show'];
+    if ($token !== null) {
+        $headers[] = 'Authorization: Bearer '.$token;
+    }
+    $content = '';
+    if ($method === 'GET') {
+        $url .= $data === [] ? '' : '?'.http_build_query($data);
+    } elseif ($data !== []) {
+        $headers[] = 'Content-Type: application/json';
+        $content = json_encode($data, JSON_THROW_ON_ERROR);
+    }
+    $context = stream_context_create(['http' => ['method' => $method, 'header' => $headers, 'content' => $content,
+        'ignore_errors' => true, 'follow_location' => 0, 'timeout' => 30]]);
+    $stream = @fopen($url, 'r', false, $context);
+    if ($stream === false) {
+        throw new RuntimeException("Couldn't reach Diff Stage at ".service().'. Check your connection and try again.');
+    }
+    $status = (int) preg_replace('#\AHTTP/\S+ (\d{3}).*\z#s', '$1', stream_get_meta_data($stream)['wrapper_data'][0]);
+    $body = stream_get_contents($stream);
+    fclose($stream);
+
+    return [$status, json_decode($body ?: '[]', true) ?? []];
+}
+
+function openBrowser(string $url): void
+{
+    $browser = getenv('BROWSER') ?: match (PHP_OS_FAMILY) {
+        'Darwin' => 'open',
+        'Windows' => 'explorer',
+        default => 'xdg-open',
+    };
+    $process = @proc_open([$browser, $url], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    if (is_resource($process)) {
+        proc_close($process);
+    }
+}
+
+/** Signs in through the browser. An unfinished sign-in is resumed, so a timed-out command can simply run again. */
+function signIn(): string
+{
+    $pending = credential();
+    if ($pending !== null && api('GET', '/api/cli/session', $pending['token'])[0] === 401) {
+        $pending = null;
+    }
+    if ($pending === null) {
+        [$status, $body] = api('POST', '/api/cli/sessions', data: ['name' => gethostname() ?: 'This computer']);
+        if ($status !== 201) {
+            throw new RuntimeException($body['message'] ?? "Diff Stage couldn't start a sign-in ({$status}).");
+        }
+        $pending = ['token' => $body['token'], 'pending' => true, 'code' => $body['code'], 'url' => $body['url'], 'interval' => $body['interval']];
+        remember($pending);
+    }
+
+    echo "Sign in to Diff Stage by approving this code in your browser:\n\n";
+    echo '  '.paint($pending['code'], '1').'  '.$pending['url']."\n\n";
+    openBrowser($pending['url']);
+    echo "Waiting for approval…\n";
+    while (true) {
+        [$status, $body] = api('GET', '/api/cli/session', $pending['token']);
+        if ($status === 200) {
+            remember(['token' => $pending['token']]);
+            echo paint('✓', '32').' Signed in as '.$body['user']['name']."\n\n";
+
+            return $pending['token'];
+        }
+        if ($status !== 202) {
+            remember(null);
+
+            throw new RuntimeException('The sign-in code expired. Run the command again for a new one.');
+        }
+        sleep($pending['interval']);
+    }
+}
+
+/**
+ * @param  array<string, mixed>  $data
+ * @return array{repository: string, branch: string, selection: list<array{file: string, test: ?string, note: ?string}>}
+ */
+function request(string $method, array $data): array
+{
+    $credential = credential();
+    $token = $credential === null || ($credential['pending'] ?? false) ? signIn() : $credential['token'];
+    [$status, $body] = api($method, '/api/selection', $token, $data);
+    if ($status === 401) {
+        remember(null);
+        [$status, $body] = api($method, '/api/selection', signIn(), $data);
+    }
+    if ($status !== 200) {
+        throw new RuntimeException($body['message'] ?? "Diff Stage returned {$status}.");
+    }
+
+    return $body;
+}
+
+function repository(): string
+{
+    $remote = git(['remote', 'get-url', 'origin']);
+    if (! preg_match('#github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?\z#', $remote, $match)) {
+        throw new RuntimeException("Diff Stage works with GitHub repositories, and origin is {$remote}.");
+    }
+
+    return $match[1];
+}
+
+function branch(): string
+{
+    $branch = git(['branch', '--show-current']);
+    try {
+        $default = git(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+    } catch (RuntimeException) {
+        $default = 'origin/main';
+    }
+    if ($branch === '' || 'origin/'.$branch === $default) {
+        throw new RuntimeException('Switch to your pull request branch first.');
+    }
+
+    return $branch;
+}
+
+function label(string $file, ?string $test): string
+{
+    return basename($file, '.php').($test === null ? ' (every test)' : ' › '.$test);
+}
+
+function note(?string $note): string
+{
+    return $note === null ? paint('No note yet. Add one with --why so reviewers know what to watch.', '33') : paint($note, '2');
+}
+
+try {
+    $arguments = array_slice($argv, 1);
+    $why = null;
+    $selection = null;
+    $clear = false;
+    for ($index = 0; $index < count($arguments); $index++) {
+        $argument = $arguments[$index];
+        if (in_array($argument, ['-h', '--help'], true)) {
+            echo USAGE."\n";
+            exit(0);
+        } elseif ($argument === 'logout' && count($arguments) === 1) {
+            $credential = credential();
+            if ($credential !== null && ! ($credential['pending'] ?? false)) {
+                api('DELETE', '/api/cli/session', $credential['token']);
+            }
+            remember(null);
+            echo "Signed out of Diff Stage on this computer.\n";
+            exit(0);
+        } elseif ($argument === '--clear') {
+            $clear = true;
+        } elseif ($argument === '--why') {
+            $why = trim($arguments[++$index] ?? '');
+        } elseif (str_starts_with($argument, '--why=')) {
+            $why = trim(substr($argument, 6));
+        } elseif ($selection === null && ! str_starts_with($argument, '-')) {
+            $selection = trim($argument);
+        } else {
+            throw new RuntimeException("Unexpected argument: {$argument}\n\n".USAGE);
+        }
+    }
+    $branch = ['repository' => repository(), 'branch' => branch()];
+
+    if ($clear) {
+        request('DELETE', $branch);
+        echo paint('✓', '32')." {$branch['branch']} no longer shows reviewers any browser tests.\n";
+        exit(0);
+    }
+
+    if ($selection === null) {
+        $shown = request('GET', $branch)['selection'];
+        if ($shown === []) {
+            echo "{$branch['branch']} doesn't show reviewers any browser tests yet.\n\n".USAGE."\n";
+            exit(0);
+        }
+        echo "{$branch['branch']} shows reviewers ".count($shown).' browser '.(count($shown) === 1 ? 'test' : 'tests').":\n\n";
+        foreach ($shown as $position => $entry) {
+            echo '  '.($position + 1).'. '.paint(label($entry['file'], $entry['test']), '1')."\n";
+            echo '     '.note($entry['note'])."\n";
+        }
+        exit(0);
+    }
+
+    [$file, $test] = array_pad(explode('::', $selection, 2), 2, null);
+    $file = trim($file);
+    $test = $test === null ? null : trim($test);
+    if ($test === '') {
+        throw new RuntimeException("Add the test name after :: or select the whole file.\n\n".USAGE);
+    }
+    $videos = Scenarios::count($file, $test);
+
+    $shown = request('POST', $branch + ['file' => $file, 'test' => $test, 'note' => $why ?: null])['selection'];
+    $entry = array_values(array_filter($shown, fn (array $entry): bool => $entry['file'] === $file && $entry['test'] === $test))[0];
+    try {
+        $pushed = git(['rev-parse', '@{upstream}']) === git(['rev-parse', 'HEAD']);
+    } catch (RuntimeException) {
+        $pushed = false;
+    }
+
+    echo paint('✓', '32').' '.paint(label($file, $test), '1')."\n";
+    echo '  '.$videos.' '.($videos === 1 ? 'video' : 'videos').' · shown on '.$branch['branch']."\n";
+    echo '  '.note($entry['note'])."\n";
+    echo "\n".($pushed ? 'Your latest commit is already pushed. Push again, or re-run Browser evidence, to record it.' : 'Diff Stage records it when you push.')."\n";
+} catch (Throwable $exception) {
+    fwrite(STDERR, $exception->getMessage()."\n");
+    exit(1);
+}

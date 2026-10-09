@@ -29,10 +29,8 @@ for video in "${videos[@]}"; do names+=("$(basename "$video" .webm)"); done
 
 review='[]'
 if [[ "$MODE" == pull_request ]]; then
-  review=$(jq -Rs -f "$(dirname "${BASH_SOURCE[0]}")/review.jq" <<< "${PR_BODY:-}")
+  review=$(printf '%s' "${SELECTION:-}" | node "$(dirname "${BASH_SOURCE[0]}")/review.cjs" "$VIDEOS/titles.json" "${names[@]}")
 fi
-jq -nr --argjson review "$review" '$review[].flow_key | select(IN($ARGS.positional[]) | not)
-  | "::warning::Browser review lists \(.), but no video has that flow key."' --args "${names[@]}"
 mapfile -t names < <(jq -rn --argjson review "$review" '($review | map(.flow_key)) as $keys
   | ($keys - ($keys - $ARGS.positional)) + ($ARGS.positional - $keys) | .[]' --args "${names[@]}")
 
@@ -107,7 +105,8 @@ if [[ "$fast" == true ]]; then
   echo "Recordings queued for server processing: $run_url"
 fi
 
-cards=''
+cards=$(mktemp)
+trap 'rm -f "$cards"' EXIT
 for name in "${names[@]}"; do
   video="$VIDEOS/$name.webm"
   title=$(jq -r --arg f "$name.webm" '.[$f] // empty' "$VIDEOS/titles.json" 2>/dev/null || true)
@@ -145,22 +144,8 @@ for name in "${names[@]}"; do
     --form-string "upload_id=$(jq -r .upload_id <<< "$grant")" \
     -F "telemetry=@$telemetry;type=application/json")
   fi
-  video_url=$(jq -r '.url | @html' <<< "$uploaded")
-  poster_url=$(jq -r '.poster_url | @html' <<< "$uploaded")
-  escaped_title=$(jq -nr --arg title "$title" '$title | @html')
-  cards+=$(printf '<h4>%s</h4>\n' "$escaped_title")
-  cards+=$'\n\n'
-  if [[ $(jq '.poster_public != false' <<< "$uploaded") == true ]]; then
-    cards+=$(printf '<p><a href="%s"><img src="%s" width="640" alt="%s"></a></p>\n' \
-      "$video_url" "$poster_url" "$escaped_title")
-    cards+=$'\n\n'
-  fi
-  if [[ -n "$entry" ]]; then
-    cards+=$(printf '<p>%s</p>\n' "$(jq -r '.reason | @html' <<< "$entry")")
-    cards+=$'\n\n'
-  fi
-  cards+=$(printf '<p><a href="%s">Watch video on Diff Stage</a></p>\n' "$video_url")
-  cards+=$'\n\n'
+  jq -c --arg title "$title" --argjson entry "${entry:-null}" \
+    '{title: $title, url, poster_url, poster_public: (.poster_public != false), reason: $entry.reason}' <<< "$uploaded" >> "$cards"
 done
 
 if [[ "$fast" == false ]]; then
@@ -175,19 +160,8 @@ if [[ "$MODE" == baseline ]]; then
 fi
 
 body=$(mktemp)
-trap 'rm -f "$body"' EXIT
-{
-  echo '<!-- diff-stage -->'
-  echo "### Browser test videos for ${HEAD_SHA::7}"
-  echo
-  echo "**[Watch all ${#videos[@]} on Diff Stage]($run_url)**"
-  if [[ "$fast" == true ]]; then
-    echo
-    echo 'Recordings are processing on Diff Stage and will appear here when ready.'
-  fi
-  echo
-  printf '%s' "$cards"
-} > "$body"
+trap 'rm -f "$body" "$cards"' EXIT
+HEAD_SHA=$HEAD_SHA RUN_URL=$run_url PROCESSING=$fast node "$(dirname "${BASH_SOURCE[0]}")/comment.cjs" < "$cards" > "$body"
 
 existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
   --jq '.[] | select(.body | startswith("<!-- diff-stage -->") or startswith("<!-- pr-proof -->")) | .id' | tail -n 1)

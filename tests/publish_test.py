@@ -159,7 +159,7 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
                         PR_NUMBER='42', HEAD_SHA='a' * 40, HEAD_REF='feature',
                         EVENT_NAME='push', DEFAULT_BRANCH='main', REF_NAME='main',
                         RUN_NUMBER='23', RECORDING_ID='100:1', RECORDING_SHA='b' * 40, VIDEOS=str(self.path),
-                        COMPRESS=str(self.path / 'compress'), DIFF_STAGE_TOKEN='test',
+                        COMPRESS=str(self.path / 'compress'), SELECTION='', DIFF_STAGE_TOKEN='test',
                         DIFF_STAGE_URL=f'http://127.0.0.1:{self.server.server_port}',
                         GITHUB_REPOSITORY='owner/repo', GH_LOG=str(self.path / 'gh.log'),
                         COMMENT_FILE=str(self.path / 'comment.md'), COMMENTS_FILE=str(self.path / 'comments.json'))
@@ -172,6 +172,9 @@ printf '{"steps":[{"at":0.5,"text":"Clicked checkout"}],"problems":[]}' > "${2}.
     def run_publish(self, **env):
         return subprocess.run(['bash', str(ROOT / 'publish/publish.sh')], env=self.env | env,
                               capture_output=True, text=True)
+
+    def select(self, *entries):
+        self.env['SELECTION'] = json.dumps([{'file': file, 'test': test, 'note': note} for file, test, note in entries])
 
     def uploads(self):
         return [body for path, body, _ in self.requests if path.endswith('/videos')]
@@ -291,7 +294,7 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
                 self.assertEqual(json.loads(archive.read('titles.json')), {metadata['file']: metadata['title']})
                 self.assertEqual(metadata['expanded_size'], sum(entry.file_size for entry in archive.infolist()))
         comment = (self.path / 'comment.md').read_text()
-        self.assertIn('processing on Diff Stage', comment)
+        self.assertIn('Processing on Diff Stage', comment)
         self.assertIn('http://watch/run1#booking', comment)
         self.assertNotIn('<img', comment)
 
@@ -448,25 +451,21 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         for image, title in zip(comment.images, titles.values()):
             self.assertEqual(image, {'src': 'http://poster', 'width': '640', 'alt': title})
         for title in titles.values():
-            self.assertIn(title, comment.text)
+            self.assertIn(title[0].upper() + title[1:], comment.text)
         self.assertNotIn('What to check', body)
 
-    def test_review_notes_order_uploads_and_explain_each_video(self):
+    def test_selection_notes_order_uploads_and_explain_each_test(self):
         reason = '@/etc/hostname shows the <script> & "decline" message'
-        body = '\r\n'.join([
-            'Some summary.',
-            'Browser review:',
-            '',
-            f'1. `checkout` — {reason}',
-            '2) `missing-flow`: Not recorded anywhere.',
-            '3. `checkout` - Duplicate is ignored.',
-            '4. `booking` – ' + 'x' * 1200,
-            'Recorded locally at abc1234.',
-            '5. `ignored` — After the list ended.',
-        ])
-        result = self.run_publish(PR_BODY=body)
+        (self.path / 'titles.json').write_text(json.dumps({
+            'booking.webm': 'BookingTest › it confirms a booking',
+            'checkout.webm': 'CheckoutTest › it explains a declined card',
+        }))
+        self.select(('tests/Browser/CheckoutTest.php', 'it explains a declined card', reason),
+                    ('tests/Browser/MissingTest.php', 'it was never recorded', 'Not recorded anywhere.'),
+                    ('tests/Browser/BookingTest.php', None, 'x' * 1200))
+        result = self.run_publish()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('::warning::Browser review lists missing-flow, but no video has that flow key.', result.stdout)
+        self.assertIn('::warning::Diff Stage selection names tests/Browser/MissingTest.php::it was never recorded, but no video matches it.', result.stderr)
         checkout, booking = self.uploads()
         self.assertEqual(form_field(checkout, 'flow_key'), 'checkout')
         self.assertEqual(form_field(checkout, 'review_reason'), reason)
@@ -476,32 +475,41 @@ sys.exit(subprocess.call([os.environ['REAL_CURL'], *args]))
         comment = self.comment()
         text = ''.join(comment.text)
         self.assertIn(reason, comment.text)
-        self.assertLess(text.index('checkout'), text.index(reason))
-        self.assertLess(text.index(reason), text.index('booking'))
-        self.assertIn('Watch video on Diff Stage', text)
-        self.assertEqual([image['alt'] for image in comment.images], ['checkout', 'booking'])
-        self.assertNotIn('ignored', text)
+        self.assertLess(text.index('It explains a declined card'), text.index(reason))
+        self.assertLess(text.index(reason), text.index('It confirms a booking'))
+        self.assertIn('CheckoutTest', text)
+        self.assertEqual([image['alt'] for image in comment.images],
+                         ['CheckoutTest › it explains a declined card', 'BookingTest › it confirms a booking'])
 
-    def test_review_examples_in_code_blocks_are_ignored(self):
-        example = ['Browser review:', '1. `checkout`: Example only.']
-        fenced = {
-            'backticks': ['```markdown', *example, '```'],
-            'nested fence': ['````markdown', '```markdown', *example, '```', '````'],
-            'tilde fence': ['~~~', '```', *example, '~~~~'],
-            'closer with text': ['```', '``` not a closer', *example, '```'],
-        }
-        for name, lines in fenced.items():
-            with self.subTest(name):
-                self.requests.clear()
-                body = '\n'.join(['Format:', *lines, '', 'Browser review:', '1. `booking`: The real reason.'])
-                result = self.run_publish(PR_BODY=body)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                booking, checkout = self.uploads()
-                self.assertEqual(form_field(booking, 'review_reason'), 'The real reason.')
-                self.assertNotIn(b'review_', checkout)
+    def test_dataset_variants_share_one_note_and_link_each_variant(self):
+        for name in ('booking', 'checkout'):
+            (self.path / f'{name}.webm').unlink()
+        for name in ('booking-desktop', 'booking-mobile'):
+            (self.path / f'{name}.webm').write_bytes(b'video')
+        (self.path / 'titles.json').write_text(json.dumps({
+            'booking-desktop.webm': 'BookingTest › it confirms a booking with dataset "desktop"',
+            'booking-mobile.webm': 'BookingTest › it confirms a booking with dataset "mobile"',
+        }))
+        self.select(('tests/Browser/BookingTest.php', 'it confirms a booking', 'Watch the badge.'))
+        result = self.run_publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([form_field(body, 'review_reason') for body in self.uploads()], ['Watch the badge.'] * 2)
+        body = (self.path / 'comment.md').read_text()
+        self.assertEqual(body.count('<h4>'), 1)
+        self.assertEqual(body.count('Watch the badge.'), 1)
+        self.assertEqual(len(self.comment().images), 1)
+        self.assertIn('BookingTest · <a href="http://watch/run1">desktop</a> · <a href="http://watch/run1">mobile</a>', body)
+
+    def test_notes_follow_tests_outside_the_default_browser_folder(self):
+        (self.path / 'titles.json').write_text(json.dumps({'booking.webm': 'booking.spec › it confirms a booking'}))
+        self.select(('spec/browser/booking.spec.php', 'it confirms a booking', 'Watch the badge.'))
+        result = self.run_publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(form_field(self.uploads()[0], 'review_reason'), 'Watch the badge.')
 
     def test_review_notes_only_change_pull_request_runs(self):
-        result = self.run_publish(MODE='baseline', PR_BODY='Browser review:\n1. `booking` — Reason.')
+        self.select(('tests/Browser/BookingTest.php', None, 'Reason.'))
+        result = self.run_publish(MODE='baseline')
         self.assertEqual(result.returncode, 0, result.stderr)
         for body in self.uploads():
             self.assertNotIn(b'review_', body)
