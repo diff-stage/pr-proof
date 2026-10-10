@@ -7,6 +7,8 @@ description: Show reviewers videos of a pull request's browser-visible change wi
 
 Diff Stage records the browser tests you name and posts the videos on the pull request, next to the same flow on the default branch. You choose the tests and say what to watch. Commits and the PR description stay for people.
 
+For a one-off local recording with a throwaway test, use `diff-stage-demo`. This workflow needs the selected tests in the pushed commit so CI can rerun them.
+
 ## 1. Choose the journeys that prove the change
 
 Read the diff. For each browser-visible change, pick the smallest existing Pest browser test that shows it, including unchanged tests that reach the changed behavior. When none does, add or adjust one with the `pest-browser-testing` skill: one journey per test, disposable data, a readiness assertion for asynchronous behavior and a visible final outcome. The recording shows typed and rendered data, so keep secrets and personal data out of fixtures.
