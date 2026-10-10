@@ -16,6 +16,10 @@ Show reviewers a browser test on this branch's pull request:
   vendor/bin/diff-stage-show            List what this branch shows
   vendor/bin/diff-stage-show --clear    Show nothing on this branch
   vendor/bin/diff-stage-show logout     Sign this computer out
+  vendor/bin/diff-stage-show download /tmp/evidence
+                                       Download videos for HEAD
+  vendor/bin/diff-stage-show download /tmp/evidence --sha <full-sha>
+                                       Download videos for another commit
 TEXT;
 
 /** @param list<string> $command */
@@ -154,16 +158,16 @@ function signIn(): string
 
 /**
  * @param  array<string, mixed>  $data
- * @return array{repository: string, branch: string, selection: list<array{file: string, test: ?string, note: ?string}>}
+ * @return array<string, mixed>
  */
-function request(string $method, array $data): array
+function request(string $method, array $data, string $path = '/api/selection'): array
 {
     $credential = credential();
     $token = $credential === null || ($credential['pending'] ?? false) ? signIn() : $credential['token'];
-    [$status, $body] = api($method, '/api/selection', $token, $data);
+    [$status, $body] = api($method, $path, $token, $data);
     if ($status === 401) {
         remember(null);
-        [$status, $body] = api($method, '/api/selection', signIn(), $data);
+        [$status, $body] = api($method, $path, signIn(), $data);
     }
     if ($status !== 200) {
         throw new RuntimeException($body['message'] ?? "Diff Stage returned {$status}.");
@@ -207,8 +211,106 @@ function note(?string $note): string
     return $note === null ? paint('No note yet. Add one with --why so reviewers know what to watch.', '33') : paint($note, '2');
 }
 
+/** Downloads a signed storage URL without sending the CLI credential to storage. */
+function downloadVideo(string $url, string $file): void
+{
+    $context = stream_context_create(['http' => ['follow_location' => 0, 'timeout' => 120]]);
+    $source = @fopen($url, 'rb', false, $context);
+    if ($source === false) {
+        throw new RuntimeException('Could not download a recording. Run the command again in a new directory.');
+    }
+    $target = null;
+    try {
+        $headers = stream_get_meta_data($source)['wrapper_data'];
+        if (! preg_match('#\AHTTP/\S+ 200\b#', $headers[0])) {
+            throw new RuntimeException('Storage did not return a recording. Run the command again in a new directory.');
+        }
+        $target = fopen($file.'.part', 'xb');
+        if ($target === false) {
+            throw new RuntimeException('Could not create '.$file.'.');
+        }
+        $bytes = stream_copy_to_stream($source, $target);
+        $length = null;
+        foreach ($headers as $header) {
+            if (preg_match('/\AContent-Length:\s*(\d+)\z/i', $header, $match)) {
+                $length = (int) $match[1];
+            }
+        }
+        if ($bytes === false || $bytes === 0 || stream_get_meta_data($source)['timed_out'] || ($length !== null && $bytes !== $length)) {
+            throw new RuntimeException('Recording download was incomplete. Run the command again in a new directory.');
+        }
+        fclose($target);
+        $target = null;
+        if (! rename($file.'.part', $file)) {
+            throw new RuntimeException('Could not save '.$file.'.');
+        }
+    } finally {
+        fclose($source);
+        if (is_resource($target)) {
+            fclose($target);
+        }
+        if (is_file($file.'.part')) {
+            unlink($file.'.part');
+        }
+    }
+}
+
+/** @param list<string> $arguments */
+function downloadRecordings(array $arguments): void
+{
+    if (count($arguments) !== 1 && !(count($arguments) === 3 && $arguments[1] === '--sha')) {
+        throw new RuntimeException("Use download <new-directory> [--sha <full-sha>].\n\n".USAGE);
+    }
+    $directory = rtrim($arguments[0], '/');
+    if ($directory === '' || str_starts_with($directory, '-') || file_exists($directory)) {
+        throw new RuntimeException('Choose a new directory for the downloaded recordings.');
+    }
+    $sha = $arguments[2] ?? git(['rev-parse', 'HEAD']);
+    if (! preg_match('/\A[a-f0-9]{40}\z/', $sha)) {
+        throw new RuntimeException('Use a full lowercase commit SHA.');
+    }
+    $run = request('GET', ['repository' => repository(), 'sha' => $sha], '/api/cli/runs');
+    if ($run['sha'] !== $sha) {
+        throw new RuntimeException('Diff Stage returned recordings for a different commit.');
+    }
+    if ($run['status'] !== 'ready') {
+        throw new RuntimeException("Recordings for {$sha} are {$run['status']}. "
+            .($run['status'] === 'failed' ? 'Re-run the recording workflow in GitHub Actions.' : 'Run this command again once processing finishes.'));
+    }
+    if ($run['videos'] === []) {
+        throw new RuntimeException('This commit has no videos to download.');
+    }
+    $umask = umask(0077);
+    try {
+        if (! mkdir($directory, 0700, true)) {
+            throw new RuntimeException('Could not create '.$directory.'.');
+        }
+        foreach ($run['videos'] as &$video) {
+            if (! preg_match('/\A[0-9A-Z]{26}\z/', $video['id'])) {
+                throw new RuntimeException('Diff Stage returned an invalid recording ID.');
+            }
+            $video['file'] = $video['id'].'.mp4';
+            downloadVideo($video['url'], $directory.'/'.$video['file']);
+            unset($video['url']);
+        }
+        unset($video);
+        unset($run['expires_at']);
+        if (file_put_contents($directory.'/manifest.json', json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n") === false) {
+            throw new RuntimeException('Could not save the recording manifest.');
+        }
+    } finally {
+        umask($umask);
+    }
+    echo 'Downloaded '.count($run['videos'])." videos for {$sha} to {$directory}.\n";
+    echo "Test names and notes: {$directory}/manifest.json\n";
+}
+
 try {
     $arguments = array_slice($argv, 1);
+    if (($arguments[0] ?? null) === 'download') {
+        downloadRecordings(array_slice($arguments, 1));
+        exit(0);
+    }
     $why = null;
     $selection = null;
     $clear = false;

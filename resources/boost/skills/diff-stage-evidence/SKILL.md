@@ -42,4 +42,18 @@ Videos land in `tests/Browser/Videos`. Check that the change is readable and tha
 
 Push the branch and open the pull request. CI records the named tests at the pushed commit, and Diff Stage comments on the pull request with each video and its note. Tests named after the latest push are recorded on the next push.
 
-The task is done when the Diff Stage comment names the pull request's head commit and lists every test you named.
+## 5. Verify the published videos
+
+Download the recordings for the checkout's exact commit, including private repositories:
+
+```bash
+vendor/bin/diff-stage-show download /tmp/diff-stage-evidence
+```
+
+Use a new directory each time. To inspect a different commit, add `--sha` with its full SHA. The command uses the saved CLI sign-in, so downloading private videos needs no separate browser login.
+
+If recordings are uploading or processing, the command exits unsuccessfully without creating the directory. Retry once processing finishes. Failed processing needs a new recording workflow run.
+
+Read `manifest.json` for the full commit SHA, test names, reviewer notes and local filenames. Watch every downloaded MP4 through its final outcome. A successful download confirms access, not that the video demonstrates the change.
+
+The task is done when the recordings match the pull request's head commit, include every named test and have been watched.
