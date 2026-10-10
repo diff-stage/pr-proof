@@ -24,6 +24,12 @@ class ShowTest(unittest.TestCase):
         self.tokens = {'pending-token': 'pending'}
         self.selection = []
         self.missing_repository = False
+        self.run_status = 'ready'
+        self.storage_status = 200
+        self.storage_bytes = b'private video bytes'
+        self.storage_length = 19
+        self.wrong_sha = False
+        self.empty_run = False
         owner = self
 
         class Service(BaseHTTPRequestHandler):
@@ -40,6 +46,13 @@ class ShowTest(unittest.TestCase):
                 data = json.loads(self.rfile.read(length)) if length else {k: v[0] for k, v in parse_qs(url.query).items()}
                 token = (self.headers.get('Authorization') or '').removeprefix('Bearer ')
                 owner.requests.append((self.command, url.path, token, data))
+                if url.path == '/storage/video':
+                    self.send_response(owner.storage_status)
+                    self.send_header('Content-Type', 'video/mp4')
+                    self.send_header('Content-Length', str(owner.storage_length))
+                    self.end_headers()
+                    self.wfile.write(owner.storage_bytes)
+                    return
                 if (self.command, url.path) == ('POST', '/api/cli/sessions'):
                     return self.respond(201, {'token': 'pending-token', 'code': 'BCDF-GHJK', 'url': 'https://diffstage.test/cli/BCDF-GHJK', 'interval': 0})
                 if (self.command, url.path) == ('GET', '/api/cli/session'):
@@ -57,6 +70,15 @@ class ShowTest(unittest.TestCase):
                     return self.respond(204)
                 if owner.missing_repository:
                     return self.respond(404, {'message': "example/shop isn't connected to a Diff Stage team you're in."})
+                if url.path == '/api/cli/runs':
+                    return self.respond(200, {
+                        'repository': data['repository'], 'id': '01J00000000000000000000000',
+                        'sha': 'b' * 40 if owner.wrong_sha else data['sha'], 'branch': 'feature',
+                        'url': 'https://diffstage.test/runs/01J00000000000000000000000',
+                        'status': owner.run_status, 'expires_at': '2030-01-01T00:00:00Z',
+                        'videos': [] if owner.empty_run else [{'id': '01J00000000000000000000001',
+                            'name': 'BookingTest › it confirms a booking', 'note': 'Watch the badge.',
+                            'url': owner.env['DIFF_STAGE_URL'] + '/storage/video?signature=private'}]})
                 if self.command == 'POST':
                     entry = next((e for e in owner.selection if (e['file'], e['test']) == (data['file'], data['test'])), None)
                     if entry is None:
@@ -229,6 +251,112 @@ file_put_contents($file, '<testSuite><tests>'.str_repeat('<testMethod name="exam
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('Your latest commit is already pushed. Push again, or re-run Browser evidence, to record it.', result.stdout)
+
+    def test_downloads_private_videos_with_saved_login_without_opening_a_browser(self):
+        self.sign_in()
+        directory = Path(self.temp.name) / 'evidence'
+        sha = self.git('rev-parse', 'HEAD').strip()
+
+        result = self.show('download', str(directory))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.opened.exists())
+        self.assertIn(('GET', '/api/cli/runs', 'saved-token', {'repository': 'example/shop', 'sha': sha}), self.requests)
+        self.assertIn(('GET', '/storage/video', '', {'signature': 'private'}), self.requests)
+        self.assertEqual((directory / '01J00000000000000000000001.mp4').read_bytes(), b'private video bytes')
+        manifest = json.loads((directory / 'manifest.json').read_text())
+        self.assertEqual(manifest['sha'], sha)
+        self.assertEqual(manifest['videos'], [{'id': '01J00000000000000000000001',
+            'name': 'BookingTest › it confirms a booking', 'note': 'Watch the badge.',
+            'file': '01J00000000000000000000001.mp4'}])
+        self.assertNotIn('signature=private', (directory / 'manifest.json').read_text())
+        self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE((directory / 'manifest.json').stat().st_mode), 0o600)
+        self.assertIn(sha, result.stdout)
+
+    def test_download_accepts_an_explicit_sha_from_a_detached_checkout(self):
+        self.sign_in()
+        self.git('checkout', '-q', '--detach')
+        directory = Path(self.temp.name) / 'evidence'
+
+        result = self.show('download', str(directory), '--sha', 'a' * 40)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads((directory / 'manifest.json').read_text())['sha'], 'a' * 40)
+
+    def test_download_reports_processing_and_failed_runs_without_creating_files(self):
+        self.sign_in()
+        for status in ['uploading', 'processing', 'failed']:
+            with self.subTest(status=status):
+                self.run_status = status
+                directory = Path(self.temp.name) / status
+
+                result = self.show('download', str(directory))
+
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('are ' + status, result.stderr)
+                self.assertFalse(directory.exists())
+        self.assertFalse(any(path == '/storage/video' for _, path, *_ in self.requests))
+
+    def test_download_refuses_a_different_commit_and_empty_runs(self):
+        self.sign_in()
+        directory = Path(self.temp.name) / 'evidence'
+        self.wrong_sha = True
+        result = self.show('download', str(directory))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('different commit', result.stderr)
+        self.assertFalse(directory.exists())
+        self.wrong_sha = False
+        self.empty_run = True
+        result = self.show('download', str(directory))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('no videos', result.stderr)
+        self.assertFalse(directory.exists())
+
+    def test_download_failure_never_writes_a_success_manifest_or_partial_video(self):
+        self.sign_in()
+        self.storage_status = 403
+        directory = Path(self.temp.name) / 'evidence'
+
+        result = self.show('download', str(directory))
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Could not download a recording', result.stderr)
+        self.assertEqual(list(directory.iterdir()), [])
+        self.assertNotIn('signature=private', result.stderr)
+
+    def test_incomplete_download_removes_partial_files_and_never_reports_success(self):
+        self.sign_in()
+        self.storage_bytes = b'partial'
+        directory = Path(self.temp.name) / 'evidence'
+
+        result = self.show('download', str(directory))
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('download was incomplete', result.stderr)
+        self.assertEqual(list(directory.iterdir()), [])
+        self.assertNotIn('Downloaded', result.stdout)
+
+    def test_download_refuses_existing_directories_and_invalid_arguments_before_sign_in(self):
+        directory = Path(self.temp.name) / 'evidence'
+        directory.mkdir()
+        for arguments in [('download', str(directory)), ('download',),
+                          ('download', str(directory) + '-new', '--sha', 'abcdef')]:
+            with self.subTest(arguments=arguments):
+                result = self.show(*arguments)
+                self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.requests, [])
+
+    def test_download_reuses_the_sign_in_flow_after_a_token_is_revoked(self):
+        self.sign_in()
+        self.tokens.pop('saved-token')
+        directory = Path(self.temp.name) / 'evidence'
+
+        result = self.show('download', str(directory))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Signed in as Kim Ward', result.stdout)
+        self.assertTrue((directory / 'manifest.json').is_file())
 
     def test_logout_revokes_this_computer(self):
         self.sign_in()
